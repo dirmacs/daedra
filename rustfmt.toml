@@ -1,0 +1,51 @@
+# Rustfmt configuration for Daedra
+
+# Maximum line width
+max_width = 100
+
+# Use spaces for indentation
+hard_tabs = false
+tab_spaces = 4
+
+# Newline style
+newline_style = "Auto"
+
+# Import organization
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+reorder_modules = true
+
+# Function formatting
+fn_args_layout = "Tall"
+fn_single_line = false
+
+# Control flow formatting
+control_brace_style = "AlwaysSameLine"
+force_multiline_blocks = false
+
+# Struct formatting
+struct_lit_single_line = true
+struct_variant_width = 35
+
+# Comment formatting
+comment_width = 80
+wrap_comments = true
+normalize_comments = false
+normalize_doc_attributes = true
+
+# Match formatting
+match_arm_blocks = true
+match_block_trailing_comma = true
+
+# Chain formatting
+chain_width = 60
+
+# Use field init shorthand
+use_field_init_shorthand = true
+
+# Use try shorthand
+use_try_shorthand = true
+
+# Edition
+edition = "2021"

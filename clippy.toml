@@ -1,0 +1,45 @@
+# Clippy configuration for Daedra
+# This file configures clippy lints
+
+# Allow certain lints
+allow-dbg-in-tests = true
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 25
+
+# Function size threshold
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 150
+
+# Type complexity threshold
+type-complexity-threshold = 300
+
+# Enum variant threshold
+enum-variant-name-threshold = 5
+
+# Doc comment line length
+doc-valid-idents = [
+    "DuckDuckGo",
+    "MCP",
+    "STDIO",
+    "SSE",
+    "JSON",
+    "HTTP",
+    "HTTPS",
+    "URL",
+    "URLs",
+    "HTML",
+    "CSS",
+    "API",
+    "TTL",
+    "CLI",
+    "TUI",
+    "GitHub",
+    "DIRMACS",
+]
+
+# MSRVaware lints
+msrv = "1.75"
+
+# Warn on missing documentation
+warn-on-all-wildcard-imports = true
