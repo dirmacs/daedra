@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "A high-performance web search and research MCP server written in Rust"
