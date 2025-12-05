@@ -237,13 +237,12 @@ impl FetchClient {
             }
 
             // Check content length
-            if let Some(content_length) = response.content_length() {
-                if content_length as usize > MAX_CONTENT_SIZE {
+            if let Some(content_length) = response.content_length()
+                && content_length as usize > MAX_CONTENT_SIZE {
                     return Err(backoff::Error::permanent(DaedraError::FetchError(
                         "Content too large".to_string(),
                     )));
                 }
-            }
 
             response.text().await.map_err(|e| {
                 error!(error = %e, url = %url, "Failed to read response body");

@@ -299,15 +299,13 @@ pub async fn perform_parallel_searches(
 fn extract_actual_url(href: &str) -> String {
     // DuckDuckGo wraps URLs in a redirect format
     // Example: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com
-    if href.contains("uddg=") {
-        if let Some(encoded_url) = href.split("uddg=").nth(1) {
-            if let Some(decoded) = encoded_url.split('&').next() {
+    if href.contains("uddg=")
+        && let Some(encoded_url) = href.split("uddg=").nth(1)
+            && let Some(decoded) = encoded_url.split('&').next() {
                 return urlencoding::decode(decoded)
                     .map(|s| s.into_owned())
                     .unwrap_or_else(|_| href.to_string());
             }
-        }
-    }
 
     // Handle direct URLs
     if href.starts_with("//") {
