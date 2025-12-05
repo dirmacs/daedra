@@ -261,7 +261,7 @@ Daedra is designed for high performance:
 
 ### Prerequisites
 
-- Rust 1.75 or later
+- Rust 1.91 or later
 - Cargo
 
 ### Building

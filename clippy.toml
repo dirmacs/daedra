@@ -39,7 +39,7 @@ doc-valid-idents = [
 ]
 
 # MSRVaware lints
-msrv = "1.75"
+msrv = "1.91"
 
 # Warn on missing documentation
 warn-on-all-wildcard-imports = true

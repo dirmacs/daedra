@@ -42,7 +42,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ### Prerequisites
 
-- Rust 1.75 or later
+- Rust 1.91 or later
 - Cargo (comes with Rust)
 - Git
 
