@@ -31,13 +31,13 @@ async fn main() -> anyhow::Result<()> {
     // First search - cache miss
     println!("=== First Search (Cache Miss) ===\n");
     let start = Instant::now();
-    
+
     let response = search::perform_search(&search_args).await?;
     let first_duration = start.elapsed();
-    
+
     println!("Search completed in {:?}", first_duration);
     println!("Results: {}", response.data.len());
-    
+
     // Store in cache
     cache
         .set_search(
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     // Second search - cache hit
     println!("\n=== Second Search (Cache Hit) ===\n");
     let start = Instant::now();
-    
+
     let cached_response = cache
         .get_search(
             &search_args.query,
@@ -62,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
             &options.safe_search.to_string(),
         )
         .await;
-    
+
     let second_duration = start.elapsed();
 
     match cached_response {
@@ -73,15 +73,15 @@ async fn main() -> anyhow::Result<()> {
                 "Speedup: {:.1}x faster",
                 first_duration.as_secs_f64() / second_duration.as_secs_f64()
             );
-        }
+        },
         None => {
             println!("Cache MISS (unexpected)");
-        }
+        },
     }
 
     // Different query - cache miss
     println!("\n=== Different Query (Cache Miss) ===\n");
-    
+
     let different_args = SearchArgs {
         query: "rust async".to_string(),
         options: Some(SearchOptions {
@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     // Demonstrate disabled cache
     println!("\n=== Disabled Cache ===\n");
     let disabled_cache = SearchCache::disabled();
-    
+
     disabled_cache
         .set_search(
             &search_args.query,

@@ -5,14 +5,14 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use daedra::{
+    DaedraResult, SERVER_NAME, VERSION,
     cache::CacheConfig,
     server::{DaedraServer, ServerConfig, TransportType},
     tools::{fetch, search},
     types::{SafeSearchLevel, SearchArgs, SearchOptions, VisitPageArgs},
-    DaedraResult, SERVER_NAME, VERSION,
 };
 use std::time::Duration;
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Daedra - High-performance Web Search and Research MCP Server
 #[derive(Parser, Debug)]
@@ -238,10 +238,7 @@ async fn run_serve(
     let transport_type = match transport {
         TransportOption::Stdio => TransportType::Stdio,
         TransportOption::Sse => {
-            let host_parts: Vec<u8> = host
-                .split('.')
-                .filter_map(|s| s.parse().ok())
-                .collect();
+            let host_parts: Vec<u8> = host.split('.').filter_map(|s| s.parse().ok()).collect();
 
             if host_parts.len() != 4 {
                 return Err(daedra::types::DaedraError::InvalidArguments(
@@ -253,7 +250,7 @@ async fn run_serve(
                 port,
                 host: [host_parts[0], host_parts[1], host_parts[2], host_parts[3]],
             }
-        }
+        },
     };
 
     server.run(transport_type).await
@@ -283,10 +280,10 @@ async fn run_search(
     match format {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&response)?);
-        }
+        },
         OutputFormat::JsonCompact => {
             println!("{}", serde_json::to_string(&response)?);
-        }
+        },
         OutputFormat::Pretty => {
             if no_color {
                 println!("\nSearch Results for: {}", query);
@@ -302,9 +299,9 @@ async fn run_search(
                     println!("{}. {}", i + 1, result.title);
                     println!("   URL: {}", result.url);
                     println!("   {}", result.description);
-                    println!("   Source: {} | Type: {:?}", 
-                        result.metadata.source,
-                        result.metadata.content_type
+                    println!(
+                        "   Source: {} | Type: {:?}",
+                        result.metadata.source, result.metadata.content_type
                     );
                     println!();
                 }
@@ -323,7 +320,11 @@ async fn run_search(
                         format!("{}.", i + 1).bright_black(),
                         result.title.white().bold()
                     );
-                    println!("   {} {}", "URL:".bright_black(), result.url.bright_blue().underline());
+                    println!(
+                        "   {} {}",
+                        "URL:".bright_black(),
+                        result.url.bright_blue().underline()
+                    );
                     println!("   {}", result.description.bright_white());
                     println!(
                         "   {} {} {} {:?}",
@@ -335,7 +336,7 @@ async fn run_search(
                     println!();
                 }
             }
-        }
+        },
     }
 
     Ok(())
@@ -359,10 +360,10 @@ async fn run_fetch(
     match format {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&content)?);
-        }
+        },
         OutputFormat::JsonCompact => {
             println!("{}", serde_json::to_string(&content)?);
-        }
+        },
         OutputFormat::Pretty => {
             if no_color {
                 println!("\n{}", content.title);
@@ -399,7 +400,7 @@ async fn run_fetch(
                     }
                 }
             }
-        }
+        },
     }
 
     Ok(())
@@ -476,7 +477,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
             } else {
                 print_success("Search client initialized");
             }
-        }
+        },
         Err(e) => {
             if no_color {
                 println!("  [FAIL] Search client: {}", e);
@@ -484,7 +485,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
                 print_error(&format!("Search client: {}", e));
             }
             all_ok = false;
-        }
+        },
     }
 
     match fetch_result {
@@ -494,7 +495,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
             } else {
                 print_success("Fetch client initialized");
             }
-        }
+        },
         Err(e) => {
             if no_color {
                 println!("  [FAIL] Fetch client: {}", e);
@@ -502,7 +503,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
                 print_error(&format!("Fetch client: {}", e));
             }
             all_ok = false;
-        }
+        },
     }
 
     // Test a simple search
@@ -537,7 +538,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
             } else {
                 print_success("Search connectivity verified");
             }
-        }
+        },
         Err(e) => {
             if no_color {
                 println!("  [FAIL] Search test: {}", e);
@@ -545,7 +546,7 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
                 print_error(&format!("Search test: {}", e));
             }
             all_ok = false;
-        }
+        },
     }
 
     println!();
@@ -560,7 +561,10 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
         if no_color {
             println!("Some checks failed. See above for details.");
         } else {
-            println!("{}", "✗ Some checks failed. See above for details.".red().bold());
+            println!(
+                "{}",
+                "✗ Some checks failed. See above for details.".red().bold()
+            );
         }
         std::process::exit(1);
     }
@@ -590,11 +594,12 @@ async fn main() {
             no_cache,
             cache_ttl,
         } => {
-            if cli.verbose && !matches!(cli.format, OutputFormat::Json | OutputFormat::JsonCompact) {
+            if cli.verbose && !matches!(cli.format, OutputFormat::Json | OutputFormat::JsonCompact)
+            {
                 print_banner();
             }
             run_serve(transport, port, host, no_cache, cache_ttl).await
-        }
+        },
 
         Commands::Search {
             query,
@@ -613,7 +618,7 @@ async fn main() {
                 cli.no_color,
             )
             .await
-        }
+        },
 
         Commands::Fetch {
             url,
@@ -624,7 +629,7 @@ async fn main() {
         Commands::Info => {
             run_info(cli.no_color);
             Ok(())
-        }
+        },
 
         Commands::Check => run_check(cli.no_color).await,
     };

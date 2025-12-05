@@ -6,12 +6,12 @@
 use crate::cache::{CacheConfig, SearchCache};
 use crate::tools::{fetch, search};
 use crate::types::{
-    search_args_schema, visit_page_args_schema, DaedraError, DaedraResult, PageContent,
-    SearchArgs, SearchResponse, VisitPageArgs,
+    DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
+    search_args_schema, visit_page_args_schema,
 };
 use crate::{SERVER_NAME, VERSION};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::RwLock;
@@ -21,8 +21,7 @@ use tracing::{debug, error, info, instrument};
 pub const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Transport type for the MCP server
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransportType {
     /// Standard input/output transport
     #[default]
@@ -35,7 +34,6 @@ pub enum TransportType {
         host: [u8; 4],
     },
 }
-
 
 /// Configuration for the Daedra server
 #[derive(Debug, Clone)]
@@ -211,7 +209,11 @@ impl DaedraHandler {
         // Check cache first
         if let Some(cached) = self
             .cache
-            .get_search(&args.query, &options.region, &options.safe_search.to_string())
+            .get_search(
+                &args.query,
+                &options.region,
+                &options.safe_search.to_string(),
+            )
             .await
         {
             info!(query = %args.query, "Returning cached search results");
@@ -238,7 +240,11 @@ impl DaedraHandler {
     #[instrument(skip(self))]
     pub async fn execute_fetch(&self, args: VisitPageArgs) -> DaedraResult<PageContent> {
         // Check cache first
-        if let Some(cached) = self.cache.get_page(&args.url, args.selector.as_deref()).await {
+        if let Some(cached) = self
+            .cache
+            .get_page(&args.url, args.selector.as_deref())
+            .await
+        {
             info!(url = %args.url, "Returning cached page content");
             return Ok(cached);
         }
@@ -263,17 +269,17 @@ impl DaedraHandler {
                 let mut initialized = self.initialized.write().await;
                 *initialized = true;
                 JsonRpcResponse::success(request.id, self.get_server_info())
-            }
+            },
 
             "initialized" => {
                 // Notification acknowledgment
                 JsonRpcResponse::success(request.id, json!({}))
-            }
+            },
 
             "tools/list" => {
                 let tools = self.list_tools();
                 JsonRpcResponse::success(request.id, json!({ "tools": tools }))
-            }
+            },
 
             "tools/call" => {
                 let params = match request.params {
@@ -284,7 +290,7 @@ impl DaedraHandler {
                             -32602,
                             "Missing parameters".to_string(),
                         );
-                    }
+                    },
                 };
 
                 let tool_name = params
@@ -294,7 +300,7 @@ impl DaedraHandler {
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
                 self.call_tool(request.id, tool_name, arguments).await
-            }
+            },
 
             "ping" => JsonRpcResponse::success(request.id, json!({})),
 
@@ -307,12 +313,7 @@ impl DaedraHandler {
     }
 
     /// Call a specific tool
-    async fn call_tool(
-        &self,
-        id: Option<Value>,
-        name: &str,
-        arguments: Value,
-    ) -> JsonRpcResponse {
+    async fn call_tool(&self, id: Option<Value>, name: &str, arguments: Value) -> JsonRpcResponse {
         info!(tool = %name, "Executing tool");
 
         match name {
@@ -325,7 +326,7 @@ impl DaedraHandler {
                             -32602,
                             format!("Invalid search arguments: {}", e),
                         );
-                    }
+                    },
                 };
 
                 match self.execute_search(args).await {
@@ -338,7 +339,7 @@ impl DaedraHandler {
                                 "isError": false
                             }),
                         )
-                    }
+                    },
                     Err(e) => {
                         error!(error = %e, "Search failed");
                         JsonRpcResponse::success(
@@ -348,9 +349,9 @@ impl DaedraHandler {
                                 "isError": true
                             }),
                         )
-                    }
+                    },
                 }
-            }
+            },
 
             "visit_page" => {
                 let args: VisitPageArgs = match serde_json::from_value(arguments) {
@@ -361,7 +362,7 @@ impl DaedraHandler {
                             -32602,
                             format!("Invalid fetch arguments: {}", e),
                         );
-                    }
+                    },
                 };
 
                 // Validate URL
@@ -392,7 +393,7 @@ impl DaedraHandler {
                                 "isError": false
                             }),
                         )
-                    }
+                    },
                     Err(e) => {
                         error!(error = %e, "Fetch failed");
                         JsonRpcResponse::success(
@@ -402,9 +403,9 @@ impl DaedraHandler {
                                 "isError": true
                             }),
                         )
-                    }
+                    },
                 }
-            }
+            },
 
             _ => JsonRpcResponse::error(id, -32601, format!("Unknown tool: {}", name)),
         }
@@ -471,17 +472,14 @@ impl DaedraServer {
             let request: JsonRpcRequest = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
-                    let error_response = JsonRpcResponse::error(
-                        None,
-                        -32700,
-                        format!("Parse error: {}", e),
-                    );
+                    let error_response =
+                        JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e));
                     let response_str = serde_json::to_string(&error_response).unwrap();
                     stdout.write_all(response_str.as_bytes()).await?;
                     stdout.write_all(b"\n").await?;
                     stdout.flush().await?;
                     continue;
-                }
+                },
             };
 
             // Handle the request
@@ -502,10 +500,10 @@ impl DaedraServer {
     /// Run the server with SSE transport
     async fn run_sse(self, host: [u8; 4], port: u16) -> DaedraResult<()> {
         use axum::{
+            Json, Router,
             extract::State,
             response::sse::{Event, Sse},
             routing::{get, post},
-            Json, Router,
         };
         use futures::stream::{self, Stream};
         use std::convert::Infallible;
@@ -522,9 +520,7 @@ impl DaedraServer {
 
         // SSE endpoint for server-to-client messages
         async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-            let stream = stream::once(async {
-                Ok(Event::default().data("connected"))
-            });
+            let stream = stream::once(async { Ok(Event::default().data("connected")) });
             Sse::new(stream)
         }
 
@@ -629,7 +625,8 @@ mod tests {
 
     #[test]
     fn test_json_rpc_response_error() {
-        let response = JsonRpcResponse::error(Some(json!(1)), -32600, "Invalid request".to_string());
+        let response =
+            JsonRpcResponse::error(Some(json!(1)), -32600, "Invalid request".to_string());
         assert_eq!(response.jsonrpc, "2.0");
         assert!(response.result.is_none());
         assert!(response.error.is_some());

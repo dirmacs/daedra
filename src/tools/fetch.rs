@@ -4,7 +4,7 @@
 //! their content as Markdown.
 
 use crate::types::{DaedraError, DaedraResult, PageContent, PageLink, VisitPageArgs};
-use backoff::{future::retry, ExponentialBackoff};
+use backoff::{ExponentialBackoff, future::retry};
 use lazy_static::lazy_static;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -227,7 +227,9 @@ impl FetchClient {
                 }
 
                 if status.as_u16() == 403 {
-                    return Err(backoff::Error::permanent(DaedraError::BotProtectionDetected));
+                    return Err(backoff::Error::permanent(
+                        DaedraError::BotProtectionDetected,
+                    ));
                 }
 
                 return Err(backoff::Error::permanent(DaedraError::FetchError(format!(
@@ -238,11 +240,12 @@ impl FetchClient {
 
             // Check content length
             if let Some(content_length) = response.content_length()
-                && content_length as usize > MAX_CONTENT_SIZE {
-                    return Err(backoff::Error::permanent(DaedraError::FetchError(
-                        "Content too large".to_string(),
-                    )));
-                }
+                && content_length as usize > MAX_CONTENT_SIZE
+            {
+                return Err(backoff::Error::permanent(DaedraError::FetchError(
+                    "Content too large".to_string(),
+                )));
+            }
 
             response.text().await.map_err(|e| {
                 error!(error = %e, url = %url, "Failed to read response body");
@@ -303,10 +306,7 @@ impl FetchClient {
                 DaedraError::InvalidArguments(format!("Invalid CSS selector: {}", sel))
             })?;
 
-            document
-                .select(&custom_selector)
-                .next()
-                .map(|el| el.html())
+            document.select(&custom_selector).next().map(|el| el.html())
         } else {
             // Try content selectors in order
             let mut content_html = None;

@@ -99,7 +99,12 @@ impl SearchCache {
 
     /// Get a cached search response
     #[instrument(skip(self))]
-    pub async fn get_search(&self, query: &str, region: &str, safe_search: &str) -> Option<SearchResponse> {
+    pub async fn get_search(
+        &self,
+        query: &str,
+        region: &str,
+        safe_search: &str,
+    ) -> Option<SearchResponse> {
         if !self.enabled {
             return None;
         }
@@ -210,7 +215,7 @@ impl std::fmt::Display for CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ResultMetadata, SearchResult, ContentType, SearchOptions};
+    use crate::types::{ContentType, ResultMetadata, SearchOptions, SearchResult};
 
     #[tokio::test]
     async fn test_cache_search() {
@@ -232,10 +237,17 @@ mod tests {
         let response = SearchResponse::new("test".to_string(), results, &options);
 
         // Initially empty
-        assert!(cache.get_search("test", "wt-wt", "MODERATE").await.is_none());
+        assert!(
+            cache
+                .get_search("test", "wt-wt", "MODERATE")
+                .await
+                .is_none()
+        );
 
         // Set and get
-        cache.set_search("test", "wt-wt", "MODERATE", response.clone()).await;
+        cache
+            .set_search("test", "wt-wt", "MODERATE", response.clone())
+            .await;
         let cached = cache.get_search("test", "wt-wt", "MODERATE").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().data.len(), 1);
@@ -258,7 +270,9 @@ mod tests {
         assert!(cache.get_page("https://example.com", None).await.is_none());
 
         // Set and get
-        cache.set_page("https://example.com", None, content.clone()).await;
+        cache
+            .set_page("https://example.com", None, content.clone())
+            .await;
         let cached = cache.get_page("https://example.com", None).await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().title, "Test Page");
@@ -272,8 +286,15 @@ mod tests {
         let options = SearchOptions::default();
         let response = SearchResponse::new("test".to_string(), results, &options);
 
-        cache.set_search("test", "wt-wt", "MODERATE", response).await;
-        assert!(cache.get_search("test", "wt-wt", "MODERATE").await.is_none());
+        cache
+            .set_search("test", "wt-wt", "MODERATE", response)
+            .await;
+        assert!(
+            cache
+                .get_search("test", "wt-wt", "MODERATE")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]

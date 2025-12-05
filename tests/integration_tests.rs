@@ -31,11 +31,11 @@ mod search_tests {
                 assert!(!response.data.is_empty());
                 assert!(response.data.len() <= 5);
                 assert_eq!(response.metadata.query, "rust programming language");
-            }
+            },
             Err(e) => {
                 // Allow network failures in tests
                 eprintln!("Search test skipped due to network error: {}", e);
-            }
+            },
         }
     }
 
@@ -55,14 +55,11 @@ mod search_tests {
 
         match result {
             Ok(response) => {
-                assert_eq!(
-                    response.metadata.search_context.safe_search,
-                    "STRICT"
-                );
-            }
+                assert_eq!(response.metadata.search_context.safe_search, "STRICT");
+            },
             Err(e) => {
                 eprintln!("Search test skipped due to network error: {}", e);
-            }
+            },
         }
     }
 
@@ -110,10 +107,10 @@ mod fetch_tests {
                 assert!(!content.content.is_empty());
                 assert!(content.word_count > 0);
                 assert_eq!(content.url, "https://example.com");
-            }
+            },
             Err(e) => {
                 eprintln!("Fetch test skipped due to network error: {}", e);
-            }
+            },
         }
     }
 
@@ -130,10 +127,10 @@ mod fetch_tests {
         match result {
             Ok(content) => {
                 assert!(!content.content.is_empty());
-            }
+            },
             Err(e) => {
                 eprintln!("Fetch test skipped due to network error: {}", e);
-            }
+            },
         }
     }
 
@@ -172,10 +169,12 @@ mod cache_tests {
         let response = SearchResponse::new("test query".to_string(), results, &options);
 
         // Initially not cached
-        assert!(cache
-            .get_search("test query", "wt-wt", "MODERATE")
-            .await
-            .is_none());
+        assert!(
+            cache
+                .get_search("test query", "wt-wt", "MODERATE")
+                .await
+                .is_none()
+        );
 
         // Cache it
         cache
@@ -183,9 +182,7 @@ mod cache_tests {
             .await;
 
         // Now it should be cached
-        let cached = cache
-            .get_search("test query", "wt-wt", "MODERATE")
-            .await;
+        let cached = cache.get_search("test query", "wt-wt", "MODERATE").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().data.len(), 1);
     }
@@ -207,18 +204,24 @@ mod cache_tests {
             .set_search("query2", "wt-wt", "MODERATE", response2)
             .await;
 
-        assert!(cache
-            .get_search("query1", "wt-wt", "MODERATE")
-            .await
-            .is_some());
-        assert!(cache
-            .get_search("query2", "wt-wt", "MODERATE")
-            .await
-            .is_some());
-        assert!(cache
-            .get_search("query3", "wt-wt", "MODERATE")
-            .await
-            .is_none());
+        assert!(
+            cache
+                .get_search("query1", "wt-wt", "MODERATE")
+                .await
+                .is_some()
+        );
+        assert!(
+            cache
+                .get_search("query2", "wt-wt", "MODERATE")
+                .await
+                .is_some()
+        );
+        assert!(
+            cache
+                .get_search("query3", "wt-wt", "MODERATE")
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -232,10 +235,20 @@ mod cache_tests {
         cache
             .set_search("test", "wt-wt", "MODERATE", response)
             .await;
-        assert!(cache.get_search("test", "wt-wt", "MODERATE").await.is_some());
+        assert!(
+            cache
+                .get_search("test", "wt-wt", "MODERATE")
+                .await
+                .is_some()
+        );
 
         cache.clear().await;
-        assert!(cache.get_search("test", "wt-wt", "MODERATE").await.is_none());
+        assert!(
+            cache
+                .get_search("test", "wt-wt", "MODERATE")
+                .await
+                .is_none()
+        );
     }
 }
 

@@ -189,7 +189,6 @@ pub enum ContentType {
     Other,
 }
 
-
 /// Metadata for a search result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResultMetadata {
@@ -346,7 +345,10 @@ pub struct PageLink {
 /// Detect language of a query using simple heuristics
 fn detect_language(query: &str) -> String {
     // Check for Chinese characters
-    if query.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+    if query
+        .chars()
+        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
+    {
         return "zh".to_string();
     }
 

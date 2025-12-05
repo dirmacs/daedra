@@ -7,7 +7,7 @@ use crate::types::{
     ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchOptions,
     SearchResponse, SearchResult,
 };
-use backoff::{future::retry, ExponentialBackoff};
+use backoff::{ExponentialBackoff, future::retry};
 use futures::future::join_all;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -109,10 +109,7 @@ impl SearchClient {
     }
 
     /// Execute search with exponential backoff retry
-    async fn execute_search_with_retry(
-        &self,
-        params: &[(&str, String)],
-    ) -> DaedraResult<String> {
+    async fn execute_search_with_retry(&self, params: &[(&str, String)]) -> DaedraResult<String> {
         let backoff = ExponentialBackoff {
             max_elapsed_time: Some(Duration::from_secs(60)),
             ..Default::default()
@@ -301,11 +298,12 @@ fn extract_actual_url(href: &str) -> String {
     // Example: //duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com
     if href.contains("uddg=")
         && let Some(encoded_url) = href.split("uddg=").nth(1)
-            && let Some(decoded) = encoded_url.split('&').next() {
-                return urlencoding::decode(decoded)
-                    .map(|s| s.into_owned())
-                    .unwrap_or_else(|_| href.to_string());
-            }
+        && let Some(decoded) = encoded_url.split('&').next()
+    {
+        return urlencoding::decode(decoded)
+            .map(|s| s.into_owned())
+            .unwrap_or_else(|_| href.to_string());
+    }
 
     // Handle direct URLs
     if href.starts_with("//") {
@@ -448,10 +446,7 @@ mod tests {
     fn test_extract_actual_url() {
         // Test DuckDuckGo redirect URL
         let ddg_url = "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpath&rut=abc";
-        assert_eq!(
-            extract_actual_url(ddg_url),
-            "https://example.com/path"
-        );
+        assert_eq!(extract_actual_url(ddg_url), "https://example.com/path");
 
         // Test protocol-relative URL
         let relative_url = "//example.com/path";
@@ -496,8 +491,14 @@ mod tests {
 
     #[test]
     fn test_extract_domain() {
-        assert_eq!(extract_domain("https://www.example.com/path"), "www.example.com");
-        assert_eq!(extract_domain("https://docs.rust-lang.org"), "docs.rust-lang.org");
+        assert_eq!(
+            extract_domain("https://www.example.com/path"),
+            "www.example.com"
+        );
+        assert_eq!(
+            extract_domain("https://docs.rust-lang.org"),
+            "docs.rust-lang.org"
+        );
         // For non-URL strings, the regex still extracts the text as a potential domain
         assert_eq!(extract_domain("invalid"), "invalid");
         // Empty string should return unknown
