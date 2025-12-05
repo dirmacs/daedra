@@ -10,7 +10,7 @@ homepage = "https://github.com/dirmacs/daedra"
 documentation = "https://docs.rs/daedra"
 readme = "README.md"
 keywords = ["mcp", "duckduckgo", "search", "ai", "cli"]
-categories = ["command-line-utilities", "mcp-server", "web-programming", "development-tools", "ai", "search", "research", "duckduckgo"]
+categories = ["command-line-utilities", "mcp-server", "web-programming", "development-tools", "ai"]
 rust-version = "1.91"
 
 [lib]
