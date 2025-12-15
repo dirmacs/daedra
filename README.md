@@ -332,16 +332,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Related Projects
 
-- [rmcp](https://github.com/anthropics/rmcp) - Rust MCP SDK
+- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) - Rust MCP SDK
 - [mcp-duckduckresearch](https://github.com/bkataru-workshop/mcp-duckduckresearch) - TypeScript inspiration
-- [DIRMACS](https://dirmacs.com) - Parent organization
-
-## Acknowledgments
-
-- [Anthropic](https://anthropic.com) for the Model Context Protocol
-- [DuckDuckGo](https://duckduckgo.com) for the search service
-- The Rust community for excellent crates
-
+- [DIRMACS](https://github.com/dirmacs) - Parent organization
 ---
 
 Made with ❤️ by [DIRMACS Global Services](https://dirmacs.com)
