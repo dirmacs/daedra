@@ -440,8 +440,8 @@ pub fn is_valid_url(url: &str) -> bool {
 
 /// Convert HTML to Markdown
 fn html_to_markdown(html: &str) -> String {
-    // Use html2md crate for conversion
-    html2md::parse_html(html)
+    // Use htmd crate for conversion
+    htmd::convert(html).unwrap_or_else(|_| html.to_string())
 }
 
 /// Clean up Markdown content

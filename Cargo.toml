@@ -71,7 +71,7 @@ lazy_static = "1.5.0"
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 
 # Markdown conversion
-html2md = "0.2.15"
+htmd = "0.5.0"
 
 # HTTP server for SSE transport
 axum = { version = "0.8.7", features = ["macros"] }
