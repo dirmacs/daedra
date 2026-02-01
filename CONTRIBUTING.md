@@ -181,7 +181,8 @@ daedra/
 │       ├── search.rs   # Search implementation
 │       └── fetch.rs    # Page fetching implementation
 ├── tests/
-│   └── integration_tests.rs
+│   ├── integration_tests.rs      # General integration tests
+│   └── stdio_transport_tests.rs  # STDIO transport & MCP protocol tests
 ├── benches/
 │   └── search_benchmark.rs
 ├── examples/
