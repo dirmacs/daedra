@@ -45,7 +45,7 @@ daedra = "0.1"
 
 ### As an MCP Server
 
-#### STDIO Transport (for Claude Desktop)
+#### STDIO Transport (for Claude Desktop, Cursor, etc.)
 
 Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 
@@ -54,10 +54,13 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
   "mcpServers": {
     "daedra": {
       "command": "daedra",
-      "args": ["serve", "--transport", "stdio"]
+      "args": ["serve", "--transport", "stdio", "--quiet"]
     }
   }
 }
+```
+
+> **Note:** The `--quiet` flag is recommended for MCP clients to suppress log output. Without it, logs are written to stderr which some clients may display.
 ```
 
 #### SSE Transport (HTTP)
@@ -220,10 +223,13 @@ Options:
       --host <HOST>            Host to bind to [default: 127.0.0.1]
       --no-cache               Disable result caching
       --cache-ttl <SECONDS>    Cache TTL in seconds [default: 300]
-  -v, --verbose                Enable verbose output
+  -v, --verbose                Enable verbose output (debug logging)
+  -q, --quiet                  Disable all logging output
   -f, --format <FORMAT>        Output format [default: pretty] [possible values: pretty, json, json-compact]
       --no-color               Disable colored output
 ```
+
+> **Note:** For stdio transport, logs are automatically routed to stderr to prevent corruption of the JSON-RPC stream. Use `--quiet` to disable logging entirely.
 
 ## Architecture
 
