@@ -271,8 +271,9 @@ impl DaedraHandler {
                 JsonRpcResponse::success(request.id, self.get_server_info())
             },
 
-            "initialized" => {
-                // Notification acknowledgment
+            "initialized" | "notifications/initialized" => {
+                // Notification acknowledgment - per MCP spec, notifications don't require responses
+                // but we return success for compatibility with clients that expect one
                 JsonRpcResponse::success(request.id, json!({}))
             },
 
@@ -705,5 +706,48 @@ mod tests {
         let response = handler.handle_request(request).await;
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_handle_notifications_initialized() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        // Test the "notifications/initialized" variant (with prefix)
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+
+        let response = handler.handle_request(request).await;
+        // Should succeed, not return "Method not found"
+        assert!(
+            response.error.is_none(),
+            "notifications/initialized should not return error"
+        );
+        assert!(response.result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_initialized_without_prefix() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        // Test the "initialized" variant (without prefix)
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "initialized".to_string(),
+            params: None,
+        };
+
+        let response = handler.handle_request(request).await;
+        assert!(
+            response.error.is_none(),
+            "initialized should not return error"
+        );
+        assert!(response.result.is_some());
     }
 }
