@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-02-01
+
+### Changed
+- Updated `mcp_server` example to demonstrate proper stderr logging for STDIO transport
+- Updated CONTRIBUTING.md with new test file in project structure
+
+### Documentation
+- Added notes about STDIO transport logging behavior to README
+- Added `--quiet` flag documentation
+- Improved example code with transport-aware logging setup
+
 ## [0.1.5] - 2026-02-01
 
 ### Fixed
@@ -77,7 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial public release
 
-[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/dirmacs/daedra/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/dirmacs/daedra/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/dirmacs/daedra/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/dirmacs/daedra/compare/v0.1.2...v0.1.3
