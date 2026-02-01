@@ -32,6 +32,10 @@ struct Cli {
     #[arg(short, long, global = true)]
     verbose: bool,
 
+    /// Disable all logging output (useful for stdio transport)
+    #[arg(short, long, global = true)]
+    quiet: bool,
+
     /// Output format
     #[arg(short, long, global = true, default_value = "pretty")]
     format: OutputFormat,
@@ -157,18 +161,33 @@ impl From<SafeSearchOption> for SafeSearchLevel {
     }
 }
 
-fn setup_logging(verbose: bool) {
-    let filter = if verbose {
+/// Set up logging with configurable output destination
+///
+/// # Arguments
+/// * `verbose` - Enable debug-level logging
+/// * `use_stderr` - Write logs to stderr instead of stdout (required for stdio transport)
+/// * `quiet` - Disable all logging output
+fn setup_logging(verbose: bool, use_stderr: bool, quiet: bool) {
+    // If quiet mode, use a very restrictive filter that effectively disables logging
+    let filter = if quiet {
+        EnvFilter::new("off")
+    } else if verbose {
         EnvFilter::new("debug")
     } else {
         EnvFilter::new("info")
     };
 
-    fmt()
+    let subscriber = fmt()
         .with_env_filter(filter)
         .with_target(false)
-        .with_thread_ids(false)
-        .init();
+        .with_thread_ids(false);
+
+    // For stdio transport, logs MUST go to stderr to avoid corrupting the JSON-RPC stream
+    if use_stderr {
+        subscriber.with_writer(std::io::stderr).init();
+    } else {
+        subscriber.init();
+    }
 }
 
 fn print_banner() {
@@ -582,8 +601,10 @@ async fn main() {
     }
 
     // Set up logging for serve command only
-    if matches!(cli.command, Commands::Serve { .. }) {
-        setup_logging(cli.verbose);
+    // For stdio transport, logs MUST go to stderr to avoid corrupting the JSON-RPC stream
+    if let Commands::Serve { transport, .. } = &cli.command {
+        let use_stderr = matches!(transport, TransportOption::Stdio);
+        setup_logging(cli.verbose, use_stderr, cli.quiet);
     }
 
     let result = match cli.command {
@@ -594,7 +615,11 @@ async fn main() {
             no_cache,
             cache_ttl,
         } => {
-            if cli.verbose && !matches!(cli.format, OutputFormat::Json | OutputFormat::JsonCompact)
+            // Only show banner for SSE transport (not stdio) and when verbose and not quiet
+            if cli.verbose
+                && !cli.quiet
+                && !matches!(cli.format, OutputFormat::Json | OutputFormat::JsonCompact)
+                && matches!(transport, TransportOption::Sse)
             {
                 print_banner();
             }
