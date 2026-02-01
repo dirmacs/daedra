@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-02-01
+
+### Fixed
+- **stdio transport**: Route all log output to stderr instead of stdout to prevent JSON-RPC stream corruption (#4)
+- **stdio transport**: Suppress decorative banner when using stdio transport
+- **MCP protocol**: Handle `notifications/initialized` method (with prefix) as a no-op instead of returning "Method not found"
+
+### Added
+- New `--quiet` / `-q` flag to disable all logging output (useful for stdio transport)
+- Comprehensive stdio transport integration test suite (19 new tests)
+  - Protocol compliance tests (stdout purity, no ANSI codes, JSON-RPC structure)
+  - MCP handshake tests (initialize, initialized, tools/list, ping)
+  - Tool execution tests (search_duckduckgo, visit_page)
+  - Error handling tests (malformed JSON, invalid params, unknown methods)
+
 ## [0.1.4] - 2026-01-21
 
 ### Fixed
@@ -62,7 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial public release
 
-[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/dirmacs/daedra/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/dirmacs/daedra/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/dirmacs/daedra/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/dirmacs/daedra/compare/v0.1.0...v0.1.2
