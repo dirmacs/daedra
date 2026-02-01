@@ -1,6 +1,14 @@
 //! MCP Server example for Daedra
 //!
+//! This example demonstrates how to start a Daedra MCP server programmatically.
+//!
 //! Run with: cargo run --example mcp_server
+//!
+//! For STDIO transport (default), set USE_SSE=0 or leave unset.
+//! For SSE transport, set USE_SSE=1.
+//!
+//! Note: When using STDIO transport, logs are automatically routed to stderr
+//! to prevent corruption of the JSON-RPC stream on stdout.
 
 use daedra::cache::CacheConfig;
 use daedra::server::{DaedraServer, ServerConfig, TransportType};
@@ -8,13 +16,25 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .init();
+    // Choose transport based on environment
+    let use_sse = std::env::var("USE_SSE").is_ok();
 
-    println!("🔍 Starting Daedra MCP Server\n");
+    // Initialize logging
+    // For STDIO transport, we write to stderr to avoid corrupting the JSON-RPC stream
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false);
+
+    if use_sse {
+        // SSE transport: logs can go to stdout
+        subscriber.init();
+        println!("Starting SSE server on http://127.0.0.1:3000");
+    } else {
+        // STDIO transport: logs MUST go to stderr
+        subscriber.with_writer(std::io::stderr).init();
+        eprintln!("Starting STDIO server (for MCP clients)");
+        eprintln!("Note: Logs are written to stderr to keep stdout clean for JSON-RPC");
+    }
 
     // Configure the server
     let config = ServerConfig {
@@ -30,15 +50,13 @@ async fn main() -> anyhow::Result<()> {
     // Create the server
     let server = DaedraServer::new(config)?;
 
-    // Choose transport based on environment or arguments
-    let transport = if std::env::var("USE_SSE").is_ok() {
-        println!("Starting SSE server on http://127.0.0.1:3000");
+    // Choose transport
+    let transport = if use_sse {
         TransportType::Sse {
             port: 3000,
             host: [127, 0, 0, 1],
         }
     } else {
-        println!("Starting STDIO server (for MCP clients)");
         TransportType::Stdio
     };
 
