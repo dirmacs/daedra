@@ -483,15 +483,20 @@ impl DaedraServer {
                 },
             };
 
+            // Notifications (no id) don't get responses per JSON-RPC 2.0 spec
+            let is_notification = request.id.is_none();
+
             // Handle the request
             let response = self.handler.handle_request(request).await;
 
-            // Send the response
-            let response_str = serde_json::to_string(&response).unwrap();
-            debug!(response = %response_str, "Sending response");
-            stdout.write_all(response_str.as_bytes()).await?;
-            stdout.write_all(b"\n").await?;
-            stdout.flush().await?;
+            // Only send response for requests (not notifications)
+            if !is_notification {
+                let response_str = serde_json::to_string(&response).unwrap();
+                debug!(response = %response_str, "Sending response");
+                stdout.write_all(response_str.as_bytes()).await?;
+                stdout.write_all(b"\n").await?;
+                stdout.flush().await?;
+            }
         }
 
         info!("STDIO server stopped");
