@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daedra — Self-contained Web Search MCP Server</title>
+    <link rel="icon" type="image/svg+xml" href="https://dirmacs.github.io/daedra/img/daedra-logo.svg">
+    <style>
+        :root { --bg: #0d1117; --fg: #c9d1d9; --accent: #e94560; --card: #161b22; --border: #30363d; --dim: #8b949e; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; }
+        .hero { text-align: center; padding: 4rem 1rem 2rem; }
+        .hero img { width: 96px; margin-bottom: 1rem; }
+        .hero h1 { font-size: 2.5rem; color: #fff; margin-bottom: 0.5rem; }
+        .hero p { color: var(--dim); font-size: 1.1rem; max-width: 600px; margin: 0 auto 1.5rem; }
+        .badges { display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2rem; }
+        .badges img { height: 20px; }
+        .install { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.5rem; max-width: 400px; margin: 0 auto 3rem; font-family: monospace; font-size: 0.95rem; color: var(--accent); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; max-width: 900px; margin: 0 auto; padding: 0 1rem 3rem; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1.5rem; }
+        .card h3 { color: #fff; margin-bottom: 0.5rem; }
+        .card p { color: var(--dim); font-size: 0.9rem; }
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.85rem; }
+        th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { color: var(--accent); }
+        .section { max-width: 900px; margin: 0 auto; padding: 0 1rem 3rem; }
+        .section h2 { color: #fff; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+        code { background: var(--card); padding: 0.1em 0.4em; border-radius: 3px; font-size: 0.85rem; }
+        pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 1rem 0; }
+        pre code { background: none; padding: 0; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        footer { text-align: center; padding: 2rem; color: var(--dim); font-size: 0.85rem; border-top: 1px solid var(--border); }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <img src="https://dirmacs.github.io/daedra/img/daedra-logo.svg" alt="Daedra">
+        <h1>Daedra</h1>
+        <p>Self-contained web search MCP server. 7 backends with automatic fallback. Works from any IP. Pure Rust.</p>
+        <div class="badges">
+            <a href="https://crates.io/crates/daedra"><img src="https://img.shields.io/crates/v/daedra.svg" alt="crates.io"></a>
+            <img src="https://img.shields.io/badge/backends-7-blue.svg" alt="7 backends">
+            <img src="https://img.shields.io/badge/tests-39-brightgreen.svg" alt="39 tests">
+            <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="MIT">
+        </div>
+        <div class="install">$ cargo install daedra</div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Multi-Backend Fallback</h3>
+            <p>7 search backends tried in order. Serper → Tavily → Bing → Wikipedia → StackOverflow → GitHub → DuckDuckGo. First one that returns results wins.</p>
+        </div>
+        <div class="card">
+            <h3>Works From Any IP</h3>
+            <p>Wikipedia, StackExchange, and GitHub APIs always work — even from datacenter/VPS IPs where Google, Bing, and DDG are CAPTCHA-blocked.</p>
+        </div>
+        <div class="card">
+            <h3>MCP Server</h3>
+            <p>Drop-in MCP server for Claude, Cursor, pawan, or any MCP client. STDIO and SSE (HTTP) transports. <code>web_search</code> + <code>visit_page</code> tools.</p>
+        </div>
+        <div class="card">
+            <h3>Pure Rust</h3>
+            <p>No Docker. No Python. No SearXNG. Single binary. Async I/O, connection pooling, response caching. Daedra IS the search infrastructure.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Search Backends</h2>
+        <table>
+            <tr><th>Backend</th><th>Type</th><th>API Key</th><th>Works from VPS?</th></tr>
+            <tr><td>Serper.dev</td><td>Google JSON API</td><td><code>SERPER_API_KEY</code></td><td>Yes</td></tr>
+            <tr><td>Tavily</td><td>AI-optimized API</td><td><code>TAVILY_API_KEY</code></td><td>Yes</td></tr>
+            <tr><td>Bing</td><td>HTML scraping</td><td>None</td><td>Sometimes</td></tr>
+            <tr><td><strong>Wikipedia</strong></td><td>OpenSearch API</td><td>None</td><td><strong>Always</strong></td></tr>
+            <tr><td><strong>StackExchange</strong></td><td>Public API</td><td>None</td><td><strong>Always</strong></td></tr>
+            <tr><td><strong>GitHub</strong></td><td>Public API</td><td>None / <code>GITHUB_TOKEN</code></td><td><strong>Always</strong></td></tr>
+            <tr><td>DuckDuckGo</td><td>HTML scraping</td><td>None</td><td>Rarely</td></tr>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>Quick Start</h2>
+        <h3>MCP Server</h3>
+        <pre><code>{
+  "mcpServers": {
+    "daedra": {
+      "command": "daedra",
+      "args": ["serve", "--transport", "stdio", "--quiet"]
+    }
+  }
+}</code></pre>
+        <h3>CLI</h3>
+        <pre><code>daedra search "rust async runtime" --num-results 5
+daedra fetch https://rust-lang.org
+daedra check</code></pre>
+    </div>
+
+    <footer>
+        Built by <a href="https://dirmacs.com">DIRMACS</a> ·
+        <a href="https://github.com/dirmacs/daedra">GitHub</a> ·
+        <a href="https://crates.io/crates/daedra">crates.io</a>
+    </footer>
+</body>
+</html>
