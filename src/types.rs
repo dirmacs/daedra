@@ -114,7 +114,7 @@ impl std::str::FromStr for SafeSearchLevel {
 }
 
 /// Options for search operations
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchOptions {
     /// Region for search results (e.g., "us-en", "zh-cn")
     #[serde(default = "default_region")]
@@ -131,6 +131,17 @@ pub struct SearchOptions {
     /// Time range filter (e.g., "d" for day, "w" for week, "m" for month)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_range: Option<String>,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            region: "wt-wt".to_string(),
+            safe_search: SafeSearchLevel::Moderate,
+            num_results: 10,
+            time_range: None,
+        }
+    }
 }
 
 fn default_region() -> String {
