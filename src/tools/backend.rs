@@ -73,6 +73,10 @@ impl SearchProvider {
         info!("StackExchange backend enabled (always works, technical)");
         backends.push(Box::new(super::stackexchange::StackExchangeBackend::new()));
 
+        // GitHub — always works, code/repo search
+        info!("GitHub backend enabled (always works, code/repos)");
+        backends.push(Box::new(super::github::GitHubBackend::new()));
+
         // DDG — blocked from most datacenter IPs, last resort
         info!("DuckDuckGo backend enabled (last resort)");
         backends.push(Box::new(super::search::SearchClient::new().unwrap()));
@@ -131,5 +135,47 @@ impl SearchProvider {
             .filter(|b| b.is_available())
             .map(|b| b.name())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::SearchArgs;
+
+    #[test]
+    fn test_auto_has_backends() {
+        let provider = SearchProvider::auto();
+        let backends = provider.available_backends();
+        // Should always have at least Bing, Wikipedia, StackExchange, GitHub, DDG
+        assert!(backends.len() >= 5, "Expected at least 5 backends, got {}", backends.len());
+        assert!(backends.contains(&"bing"));
+        assert!(backends.contains(&"wikipedia"));
+        assert!(backends.contains(&"stackoverflow"));
+        assert!(backends.contains(&"github"));
+        assert!(backends.contains(&"duckduckgo"));
+    }
+
+    #[test]
+    fn test_empty_provider() {
+        let provider = SearchProvider::new(vec![]);
+        assert!(provider.available_backends().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_fallback_chain_live() {
+        // This test uses real network — Wikipedia + SO should always return results
+        let provider = SearchProvider::auto();
+        let args = SearchArgs {
+            query: "Rust programming".to_string(),
+            options: Some(crate::types::SearchOptions {
+                num_results: 3,
+                ..Default::default()
+            }),
+        };
+        let response = provider.search(&args).await;
+        assert!(response.is_ok(), "Fallback chain should find results from at least one backend");
+        let data = response.unwrap();
+        assert!(!data.data.is_empty(), "Should have at least 1 result");
     }
 }

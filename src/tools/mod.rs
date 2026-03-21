@@ -11,6 +11,7 @@
 pub mod backend;
 pub mod bing;
 pub mod fetch;
+pub mod github;
 pub mod search;
 pub mod serper;
 pub mod stackexchange;
