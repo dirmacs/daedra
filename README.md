@@ -1,53 +1,57 @@
-# 🔍 Daedra
+<p align="center">
+  <img src="docs/img/daedra-logo.svg" width="128" alt="daedra">
+</p>
+
+<h1 align="center">Daedra</h1>
+
+<p align="center">
+  Self-contained web search MCP server. Rust. 7 backends. Works from any IP.<br>
+  No API keys required. No Docker. No Python.
+</p>
+
+<p align="center">
 
 [![Crates.io](https://img.shields.io/crates/v/daedra.svg)](https://crates.io/crates/daedra)
-[![Documentation](https://docs.rs/daedra/badge.svg)](https://docs.rs/daedra)
 [![CI](https://github.com/dirmacs/daedra/actions/workflows/ci.yml/badge.svg)](https://github.com/dirmacs/daedra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+![Tests](https://img.shields.io/badge/tests-39-brightgreen.svg)
+![Backends](https://img.shields.io/badge/search_backends-7-blue.svg)
 
-**Daedra** is a high-performance web search and research [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server written in Rust. It provides web search and page fetching capabilities that can be used with AI assistants like Claude.
+**Daedra** is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. 7 search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
 
-## Features
+## Why Daedra?
 
-- 🔎 **Web Search**: Search the web using DuckDuckGo with customizable options
-- 📄 **Page Fetching**: Extract and convert web page content to Markdown
-- 🚀 **High Performance**: Built in Rust with async I/O and connection pooling
-- 💾 **Caching**: Built-in response caching for improved performance
-- 🔌 **Dual Transport**: Support for both STDIO and HTTP (SSE) transports
-- 📦 **Library & CLI**: Use as a Rust library or standalone command-line tool
+Every major search engine (Google, Bing, DuckDuckGo, Brave) blocks datacenter/VPS IPs with CAPTCHAs since 2025. Daedra solves this with a **multi-backend fallback chain** that automatically finds a backend that works:
 
-## Installation
+```
+Serper (API) → Tavily (API) → Bing → Wikipedia → StackOverflow → GitHub → DuckDuckGo
+```
 
-### From crates.io
+No Docker. No Python. No SearXNG. Pure Rust. Daedra IS the search infrastructure.
+
+## Install
 
 ```bash
 cargo install daedra
 ```
 
-### From source
+## Search backends
 
-```bash
-git clone https://github.com/dirmacs/daedra.git
-cd daedra
-cargo install --path .
-```
+| Backend | Type | API Key | Works from VPS? |
+|---------|------|---------|----------------|
+| Serper.dev | Google JSON API | `SERPER_API_KEY` | Yes |
+| Tavily | AI-optimized API | `TAVILY_API_KEY` | Yes |
+| Bing | HTML scraping | None | Sometimes (CAPTCHA risk) |
+| **Wikipedia** | OpenSearch API | None | **Always** |
+| **StackExchange** | Public API | None | **Always** |
+| **GitHub** | Public API | None / `GITHUB_TOKEN` | **Always** |
+| DuckDuckGo | HTML scraping | None | Rarely (blocked since mid-2025) |
 
-### Using Cargo
+Backends are tried in order. First one that returns results wins.
 
-Add to your `Cargo.toml`:
+## Usage
 
-```toml
-[dependencies]
-daedra = "0.1"
-```
-
-## Quick Start
-
-### As an MCP Server
-
-#### STDIO Transport (for Claude Desktop, Cursor, etc.)
-
-Add to your Claude Desktop configuration (`claude_desktop_config.json`):
+### MCP Server (for Claude, Cursor, pawan, etc.)
 
 ```json
 {
@@ -60,114 +64,48 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 }
 ```
 
-> **Note:** The `--quiet` flag is recommended for MCP clients to suppress log output. Without it, logs are written to stderr which some clients may display.
-```
-
-#### SSE Transport (HTTP)
+### CLI
 
 ```bash
-daedra serve --transport sse --port 3000 --host 127.0.0.1
-```
+# Search
+daedra search "rust async runtime" --num-results 5
 
-### As a CLI Tool
-
-#### Search the web
-
-```bash
-# Basic search
-daedra search "rust programming"
-
-# With options
-daedra search "rust async" --num-results 20 --region us-en --safe-search moderate
-
-# Output as JSON
-daedra search "rust web frameworks" --format json
-```
-
-#### Fetch a webpage
-
-```bash
-# Fetch and extract content
+# Fetch a webpage as Markdown
 daedra fetch https://rust-lang.org
 
-# Fetch with a specific selector
-daedra fetch https://example.com --selector "article.main"
+# Check backend health
+daedra check
 
-# Output as JSON
-daedra fetch https://example.com --format json
-```
-
-#### Server information
-
-```bash
+# Server info
 daedra info
 ```
 
-#### Configuration check
-
-```bash
-daedra check
-```
-
-### As a Rust Library
+### As a Rust library
 
 ```rust
-use daedra::{DaedraServer, ServerConfig, TransportType};
-use daedra::tools::{search, fetch};
-use daedra::types::{SearchArgs, SearchOptions, VisitPageArgs};
+use daedra::tools::SearchProvider;
+use daedra::types::SearchArgs;
 
-// Start an MCP server
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config = ServerConfig::default();
-    let server = DaedraServer::new(config)?;
-    server.run(TransportType::Stdio).await?;
-    Ok(())
-}
-
-// Or use tools directly
-async fn search_example() -> anyhow::Result<()> {
+    let provider = SearchProvider::auto();
     let args = SearchArgs {
         query: "rust programming".to_string(),
-        options: Some(SearchOptions {
-            num_results: 10,
-            region: "wt-wt".to_string(),
-            ..Default::default()
-        }),
+        options: None,
     };
-
-    let results = search::perform_search(&args).await?;
-    println!("Found {} results", results.data.len());
-
-    for result in results.data {
-        println!("- {} ({})", result.title, result.url);
+    let results = provider.search(&args).await?;
+    for r in &results.data {
+        println!("{} — {}", r.title, r.url);
     }
-
-    Ok(())
-}
-
-async fn fetch_example() -> anyhow::Result<()> {
-    let args = VisitPageArgs {
-        url: "https://rust-lang.org".to_string(),
-        selector: None,
-        include_images: false,
-    };
-
-    let content = fetch::fetch_page(&args).await?;
-    println!("Title: {}", content.title);
-    println!("Word count: {}", content.word_count);
-
     Ok(())
 }
 ```
 
 ## MCP Tools
 
-### `search_duckduckgo`
+### `web_search`
 
-Search the web using DuckDuckGo.
-
-**Input Schema:**
+Search the web with automatic backend fallback.
 
 ```json
 {
@@ -181,17 +119,11 @@ Search the web using DuckDuckGo.
 }
 ```
 
-**Options:**
-- `region`: Search region (e.g., `us-en`, `wt-wt` for worldwide)
-- `safe_search`: `OFF`, `MODERATE`, or `STRICT`
-- `num_results`: Number of results (1-50)
-- `time_range`: Time filter (`d`=day, `w`=week, `m`=month, `y`=year)
+Aliases: `search_duckduckgo` (backward compat)
 
 ### `visit_page`
 
-Fetch and extract content from a web page.
-
-**Input Schema:**
+Fetch and extract web page content as Markdown.
 
 ```json
 {
@@ -201,146 +133,48 @@ Fetch and extract content from a web page.
 }
 ```
 
-**Options:**
-- `url`: URL to fetch (required)
-- `selector`: CSS selector for specific content (optional)
-- `include_images`: Include image references (default: false)
-
-## Configuration
-
-### Environment Variables
-
-- `RUST_LOG`: Set logging level (`debug`, `info`, `warn`, `error`)
-
-### CLI Options
-
-```
-daedra serve [OPTIONS]
-
-Options:
-  -t, --transport <TRANSPORT>  Transport type [default: stdio] [possible values: stdio, sse]
-  -p, --port <PORT>            Port for SSE transport [default: 3000]
-      --host <HOST>            Host to bind to [default: 127.0.0.1]
-      --no-cache               Disable result caching
-      --cache-ttl <SECONDS>    Cache TTL in seconds [default: 300]
-  -v, --verbose                Enable verbose output (debug logging)
-  -q, --quiet                  Disable all logging output
-  -f, --format <FORMAT>        Output format [default: pretty] [possible values: pretty, json, json-compact]
-      --no-color               Disable colored output
-```
-
-> **Note:** For stdio transport, logs are automatically routed to stderr to prevent corruption of the JSON-RPC stream. Use `--quiet` to disable logging entirely.
-
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLI Binary                           │
-│  (clap argument parsing, colored output, TUI)               │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Library (daedra)                         │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   Server     │  │    Tools     │  │    Cache     │       │
-│  │  (rmcp MCP)  │  │ (search/     │  │   (moka)     │       │
-│  │              │  │  fetch)      │  │              │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-├─────────────────────────────────────────────────────────────┤
-│  Transport Layer: STDIO | SSE (HTTP)                         │
-└─────────────────────────────────────────────────────────────┘
+Daedra
+├── SearchProvider (fallback chain)
+│   ├── SerperBackend      (Google via API)
+│   ├── TavilyBackend      (AI-optimized API)
+│   ├── BingBackend         (HTML scraping)
+│   ├── WikipediaBackend    (OpenSearch API)
+│   ├── StackExchangeBackend (Public API)
+│   ├── GitHubBackend       (Public API)
+│   └── SearchClient        (DuckDuckGo HTML)
+├── FetchClient (HTML → Markdown)
+├── SearchCache (moka async cache)
+├── MCP Server
+│   ├── STDIO transport (JSON-RPC)
+│   └── SSE transport (Axum HTTP)
+└── CLI (clap)
 ```
 
-## Performance
-
-Daedra is designed for high performance:
-
-- **Async I/O**: Built on Tokio for efficient async operations
-- **Connection Pooling**: HTTP connections are pooled and reused
-- **Caching**: Results are cached to avoid redundant requests
-- **Concurrent Processing**: Parallel search execution support
-- **Efficient Parsing**: Fast HTML parsing with the `scraper` crate
-
-## Development
-
-### Prerequisites
-
-- Rust 1.91 or later
-- Cargo
-
-### Building
+## Configuration
 
 ```bash
-# Debug build
-cargo build
+# Optional API keys (improves result quality)
+export SERPER_API_KEY=...     # Google results via Serper
+export TAVILY_API_KEY=...     # AI-optimized search
+export GITHUB_TOKEN=...       # Higher GitHub API rate limit
 
-# Release build
-cargo build --release
+# Logging
+export RUST_LOG=daedra=info
 ```
 
-### Testing
+## Ecosystem
 
-```bash
-# Run all tests
-cargo test
+| Project | What |
+|---------|------|
+| [pawan](https://github.com/dirmacs/pawan) | CLI coding agent that uses daedra for web search via MCP |
+| [ares](https://github.com/dirmacs/ares) | Agentic retrieval-enhanced server |
+| [eruka](https://github.com/dirmacs/eruka) | Context intelligence engine |
 
-# Run unit tests only
-cargo test --lib
-
-# Run integration tests (requires network)
-cargo test -- integration
-
-# Run with logging
-RUST_LOG=debug cargo test
-```
-
-### Benchmarks
-
-```bash
-cargo bench
-```
-
-### Documentation
-
-```bash
-# Generate and open documentation
-cargo doc --open
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Code Style
-
-This project uses:
-- `rustfmt` for formatting
-- `clippy` for linting
-
-Run before committing:
-
-```bash
-cargo fmt
-cargo clippy -- -D warnings
-```
+Built by [DIRMACS](https://dirmacs.com).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Related Projects
-
-- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) - Rust MCP SDK
-- [mcp-duckduckresearch](https://github.com/bkataru-workshop/mcp-duckduckresearch) - TypeScript inspiration
-- [DIRMACS](https://github.com/dirmacs) - Parent organization
----
-
-Made with ❤️ by [DIRMACS Global Services](https://dirmacs.com)
+MIT
