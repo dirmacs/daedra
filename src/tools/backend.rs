@@ -61,12 +61,20 @@ impl SearchProvider {
             }
         }
 
-        // Bing HTML scraping — always available, no API key
-        info!("Bing backend enabled (default, no API key needed)");
+        // Bing HTML scraping — no API key, but often CAPTCHA-blocked from datacenter IPs
+        info!("Bing backend enabled (no API key, may be blocked from datacenter IPs)");
         backends.push(Box::new(super::bing::BingBackend::new()));
 
-        // DDG — always available but often blocked from datacenter IPs
-        info!("DuckDuckGo backend enabled (fallback)");
+        // Wikipedia — always works from any IP, knowledge-focused
+        info!("Wikipedia backend enabled (always works, knowledge-focused)");
+        backends.push(Box::new(super::wikipedia::WikipediaBackend::new()));
+
+        // StackExchange — always works from any IP, technical Q&A
+        info!("StackExchange backend enabled (always works, technical)");
+        backends.push(Box::new(super::stackexchange::StackExchangeBackend::new()));
+
+        // DDG — blocked from most datacenter IPs, last resort
+        info!("DuckDuckGo backend enabled (last resort)");
         backends.push(Box::new(super::search::SearchClient::new().unwrap()));
 
         Self { backends }

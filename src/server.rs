@@ -4,7 +4,7 @@
 //! tool requests and manages communication via STDIO or SSE transports.
 
 use crate::cache::{CacheConfig, SearchCache};
-use crate::tools::{fetch, search};
+use crate::tools::{self, fetch, search};
 use crate::types::{
     DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
     search_args_schema, visit_page_args_schema,
@@ -144,8 +144,8 @@ pub struct DaedraHandler {
     /// Search cache
     cache: SearchCache,
 
-    /// Search client
-    search_client: Arc<search::SearchClient>,
+    /// Multi-backend search provider with automatic fallback
+    search_provider: Arc<tools::SearchProvider>,
 
     /// Fetch client
     fetch_client: Arc<fetch::FetchClient>,
@@ -159,7 +159,7 @@ impl DaedraHandler {
     pub fn new(config: ServerConfig) -> DaedraResult<Self> {
         Ok(Self {
             cache: SearchCache::new(config.cache),
-            search_client: Arc::new(search::SearchClient::new()?),
+            search_provider: Arc::new(tools::SearchProvider::auto()),
             fetch_client: Arc::new(fetch::FetchClient::new()?),
             initialized: Arc::new(RwLock::new(false)),
         })
@@ -183,7 +183,7 @@ impl DaedraHandler {
     pub fn list_tools(&self) -> Vec<McpTool> {
         vec![
             McpTool {
-                name: "search_duckduckgo".to_string(),
+                name: "web_search".to_string(),
                 description: Some(
                     "Search the web using DuckDuckGo. Returns structured search results with metadata."
                         .to_string(),
@@ -220,8 +220,8 @@ impl DaedraHandler {
             return Ok(cached);
         }
 
-        // Perform search
-        let response = self.search_client.search(&args).await?;
+        // Perform search via multi-backend provider (automatic fallback)
+        let response = self.search_provider.search(&args).await?;
 
         // Cache the results
         self.cache
@@ -318,7 +318,7 @@ impl DaedraHandler {
         info!(tool = %name, "Executing tool");
 
         match name {
-            "search_duckduckgo" => {
+            "web_search" | "search_duckduckgo" => {
                 let args: SearchArgs = match serde_json::from_value(arguments) {
                     Ok(a) => a,
                     Err(e) => {
@@ -617,7 +617,7 @@ mod tests {
         let tools = handler.list_tools();
 
         assert_eq!(tools.len(), 2);
-        assert!(tools.iter().any(|t| t.name == "search_duckduckgo"));
+        assert!(tools.iter().any(|t| t.name == "web_search"));
         assert!(tools.iter().any(|t| t.name == "visit_page"));
     }
 
