@@ -1,12 +1,15 @@
 //! DuckDuckGo search implementation.
 //!
 //! This module provides web search functionality using DuckDuckGo's
-//! HTML interface to avoid API rate limits.
+//! HTML interface. Note: DDG blocks datacenter/VPS IPs since mid-2025.
+//! Use as fallback only — prefer Bing/Serper/Tavily backends.
 
+use super::backend::SearchBackend;
 use crate::types::{
     ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchOptions,
     SearchResponse, SearchResult,
 };
+use async_trait::async_trait;
 use backoff::{ExponentialBackoff, future::retry};
 use futures::future::join_all;
 use lazy_static::lazy_static;
@@ -436,6 +439,16 @@ fn clean_text(text: &str) -> String {
         .join(" ")
         .trim()
         .to_string()
+}
+
+// Implement SearchBackend trait for DDG
+#[async_trait]
+impl SearchBackend for SearchClient {
+    async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+        self.search(args).await
+    }
+
+    fn name(&self) -> &str { "duckduckgo" }
 }
 
 #[cfg(test)]
