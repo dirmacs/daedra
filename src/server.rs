@@ -185,7 +185,7 @@ impl DaedraHandler {
             McpTool {
                 name: "web_search".to_string(),
                 description: Some(
-                    "Search the web using DuckDuckGo. Returns structured search results with metadata."
+                    "Search the web using 9 backends (Wikipedia, StackOverflow, GitHub, Wiby, Bing, Serper, Tavily, DDG Instant, DDG). Returns aggregated results from multiple sources."
                         .to_string(),
                 ),
                 input_schema: search_args_schema(),

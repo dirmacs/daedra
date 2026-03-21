@@ -542,6 +542,13 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
     };
 
     let provider = daedra::tools::SearchProvider::auto();
+    let backends = provider.available_backends();
+    if no_color {
+        println!("  Backends: {}", backends.join(", "));
+    } else {
+        println!("  {} {} backends: {}", "✓".green(), backends.len(), backends.join(", "));
+    }
+
     match provider.search(&test_args).await {
         Ok(response) => {
             if response.data.is_empty() {
