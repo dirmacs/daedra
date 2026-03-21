@@ -294,7 +294,8 @@ async fn run_search(
         }),
     };
 
-    let response = search::perform_search(&args).await?;
+    let provider = daedra::tools::SearchProvider::auto();
+    let response = provider.search(&args).await?;
 
     match format {
         OutputFormat::Json => {
@@ -540,7 +541,8 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
         }),
     };
 
-    match search::perform_search(&test_args).await {
+    let provider = daedra::tools::SearchProvider::auto();
+    match provider.search(&test_args).await {
         Ok(response) => {
             if response.data.is_empty() {
                 if no_color {
