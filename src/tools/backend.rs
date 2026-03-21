@@ -77,56 +77,103 @@ impl SearchProvider {
         info!("GitHub backend enabled (always works, code/repos)");
         backends.push(Box::new(super::github::GitHubBackend::new()));
 
-        // DDG — blocked from most datacenter IPs, last resort
-        info!("DuckDuckGo backend enabled (last resort)");
+        // Wiby — indie web search, always works
+        info!("Wiby backend enabled (always works, indie web)");
+        backends.push(Box::new(super::wiby::WibyBackend::new()));
+
+        // DDG Instant Answers — knowledge graph, always works (different from HTML scraping)
+        info!("DDG Instant Answers backend enabled (always works, knowledge)");
+        backends.push(Box::new(super::ddg_instant::DdgInstantBackend::new()));
+
+        // DDG HTML scraping — blocked from most datacenter IPs, last resort
+        info!("DuckDuckGo HTML backend enabled (last resort)");
         backends.push(Box::new(super::search::SearchClient::new().unwrap()));
 
         Self { backends }
     }
 
-    /// Search using the fallback chain. Tries each backend in order.
+    /// Aggregate search across ALL available backends.
+    ///
+    /// Queries all backends concurrently, merges results, deduplicates by URL,
+    /// and interleaves sources for diversity (Wikipedia, StackOverflow, GitHub
+    /// results mixed rather than grouped).
     pub async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
-        let mut last_error = None;
+        let opts = args.options.clone().unwrap_or_default();
+        let target_count = opts.num_results;
 
-        for backend in &self.backends {
-            if !backend.is_available() {
-                continue;
-            }
-
-            info!(backend = backend.name(), query = %args.query, "Trying search backend");
-
-            match backend.search(args).await {
-                Ok(response) if !response.data.is_empty() => {
-                    info!(
-                        backend = backend.name(),
-                        results = response.data.len(),
-                        "Search succeeded"
-                    );
-                    return Ok(response);
+        // Query all available backends concurrently
+        let futures: Vec<_> = self.backends.iter()
+            .filter(|b| b.is_available())
+            .map(|b| {
+                let a = args.clone();
+                let name = b.name().to_string();
+                async move {
+                    info!(backend = %name, query = %a.query, "Querying backend");
+                    (name, b.search(&a).await)
                 }
-                Ok(response) => {
-                    warn!(
-                        backend = backend.name(),
-                        "Search returned 0 results, trying next backend"
-                    );
-                    last_error = Some(crate::types::DaedraError::SearchError(
-                        format!("{}: returned 0 results", backend.name()),
-                    ));
+            })
+            .collect();
+
+        let results = futures::future::join_all(futures).await;
+
+        // Collect all successful results grouped by backend
+        let mut by_source: Vec<(String, Vec<crate::types::SearchResult>)> = Vec::new();
+        let mut any_success = false;
+
+        for (name, result) in results {
+            match result {
+                Ok(response) if !response.data.is_empty() => {
+                    info!(backend = %name, count = response.data.len(), "Backend returned results");
+                    any_success = true;
+                    by_source.push((name, response.data));
+                }
+                Ok(_) => {
+                    warn!(backend = %name, "Backend returned 0 results");
                 }
                 Err(e) => {
-                    warn!(
-                        backend = backend.name(),
-                        error = %e,
-                        "Search backend failed, trying next"
-                    );
-                    last_error = Some(e);
+                    warn!(backend = %name, error = %e, "Backend failed");
                 }
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            crate::types::DaedraError::SearchError("No search backends available".into())
-        }))
+        if !any_success {
+            return Err(crate::types::DaedraError::SearchError(
+                "All search backends returned 0 results".into(),
+            ));
+        }
+
+        // Interleave results from different sources for diversity
+        // Round-robin: take 1 from each source, repeat until we have enough
+        let mut merged: Vec<crate::types::SearchResult> = Vec::new();
+        let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut indices: Vec<usize> = vec![0; by_source.len()];
+
+        loop {
+            let mut added_this_round = false;
+            for (i, (_name, results)) in by_source.iter().enumerate() {
+                if merged.len() >= target_count { break; }
+                while indices[i] < results.len() {
+                    let r = &results[indices[i]];
+                    indices[i] += 1;
+                    if seen_urls.insert(r.url.clone()) {
+                        merged.push(r.clone());
+                        added_this_round = true;
+                        break;
+                    }
+                }
+            }
+            if !added_this_round || merged.len() >= target_count { break; }
+        }
+
+        let sources: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
+        info!(
+            total = merged.len(),
+            sources = ?sources,
+            "Aggregated results from {} backends",
+            sources.len()
+        );
+
+        Ok(SearchResponse::new(args.query.clone(), merged, &opts))
     }
 
     /// List available backend names.
@@ -147,12 +194,14 @@ mod tests {
     fn test_auto_has_backends() {
         let provider = SearchProvider::auto();
         let backends = provider.available_backends();
-        // Should always have at least Bing, Wikipedia, StackExchange, GitHub, DDG
-        assert!(backends.len() >= 5, "Expected at least 5 backends, got {}", backends.len());
+        // Should always have at least 7 no-key backends
+        assert!(backends.len() >= 7, "Expected at least 7 backends, got {}", backends.len());
         assert!(backends.contains(&"bing"));
         assert!(backends.contains(&"wikipedia"));
         assert!(backends.contains(&"stackoverflow"));
         assert!(backends.contains(&"github"));
+        assert!(backends.contains(&"wiby"));
+        assert!(backends.contains(&"ddg-instant"));
         assert!(backends.contains(&"duckduckgo"));
     }
 

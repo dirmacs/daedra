@@ -220,8 +220,48 @@ impl DaedraHandler {
             return Ok(cached);
         }
 
-        // Perform search via multi-backend provider (automatic fallback)
-        let response = self.search_provider.search(&args).await?;
+        // Perform search via multi-backend provider (aggregate across backends)
+        let mut response = self.search_provider.search(&args).await?;
+
+        // Auto-enrich: fetch snippets from top 3 results that have short descriptions
+        let enrich_count = 3.min(response.data.len());
+        if enrich_count > 0 {
+            let fetch_client = self.fetch_client.clone();
+            let futures: Vec<_> = response.data[..enrich_count].iter()
+                .filter(|r| r.description.len() < 100) // only enrich sparse results
+                .map(|r| {
+                    let url = r.url.clone();
+                    let client = fetch_client.clone();
+                    async move {
+                        let args = crate::types::VisitPageArgs {
+                            url: url.clone(),
+                            selector: None,
+                            include_images: false,
+                        };
+                        match tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            client.fetch(&args),
+                        ).await {
+                            Ok(Ok(page)) => {
+                                // Take first 300 chars as enriched description
+                                let snippet: String = page.content.chars().take(300).collect();
+                                Some((url, snippet))
+                            }
+                            _ => None,
+                        }
+                    }
+                })
+                .collect();
+
+            let enrichments = futures::future::join_all(futures).await;
+            for enrichment in enrichments.into_iter().flatten() {
+                if let Some(result) = response.data.iter_mut().find(|r| r.url == enrichment.0) {
+                    if result.description.len() < 100 {
+                        result.description = enrichment.1;
+                    }
+                }
+            }
+        }
 
         // Cache the results
         self.cache

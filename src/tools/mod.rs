@@ -10,12 +10,14 @@
 
 pub mod backend;
 pub mod bing;
+pub mod ddg_instant;
 pub mod fetch;
 pub mod github;
 pub mod search;
 pub mod serper;
 pub mod stackexchange;
 pub mod tavily;
+pub mod wiby;
 pub mod wikipedia;
 
 pub use backend::*;
