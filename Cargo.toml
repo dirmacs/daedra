@@ -1,12 +1,12 @@
 [package]
 name = "daedra"
-version = "0.1.6"
+version = "0.2.0"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
-description = "A high-performance web search and research MCP server written in Rust"
+description = "Self-contained web search MCP server. 9 backends with automatic fallback. Works from any IP."
 license = "MIT"
 repository = "https://github.com/dirmacs/daedra"
-homepage = "https://github.com/dirmacs/daedra"
+homepage = "https://dirmacs.github.io/daedra"
 documentation = "https://docs.rs/daedra"
 readme = "README.md"
 keywords = ["mcp", "duckduckgo", "search", "ai", "cli"]
