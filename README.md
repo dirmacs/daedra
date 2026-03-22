@@ -171,7 +171,7 @@ export RUST_LOG=daedra=info
 |---------|------|
 | [pawan](https://github.com/dirmacs/pawan) | CLI coding agent that uses daedra for web search via MCP |
 | [ares](https://github.com/dirmacs/ares) | Agentic retrieval-enhanced server |
-| [eruka](https://github.com/dirmacs/eruka) | Context intelligence engine |
+| [eruka](https://eruka.dirmacs.com) | Context intelligence engine |
 
 Built by [DIRMACS](https://dirmacs.com).
 
