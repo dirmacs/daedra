@@ -14,10 +14,8 @@
 [![Crates.io](https://img.shields.io/crates/v/daedra.svg)](https://crates.io/crates/daedra)
 [![CI](https://github.com/dirmacs/daedra/actions/workflows/ci.yml/badge.svg)](https://github.com/dirmacs/daedra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-![Tests](https://img.shields.io/badge/tests-39-brightgreen.svg)
-![Backends](https://img.shields.io/badge/search_backends-7-blue.svg)
 
-**Daedra** is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. 7 search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
+**Daedra** is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. Multiple search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
 
 ## Why Daedra?
 
