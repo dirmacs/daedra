@@ -10,6 +10,7 @@
 
 pub mod backend;
 pub mod bing;
+pub mod crawl;
 pub mod ddg_instant;
 pub mod fetch;
 pub mod github;
@@ -21,5 +22,6 @@ pub mod wiby;
 pub mod wikipedia;
 
 pub use backend::*;
+pub use crawl::{crawl_site, parse_sitemap};
 pub use fetch::*;
 pub use search::*;
