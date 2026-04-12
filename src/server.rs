@@ -4,10 +4,10 @@
 //! tool requests and manages communication via STDIO or SSE transports.
 
 use crate::cache::{CacheConfig, SearchCache};
-use crate::tools::{self, fetch, search};
+use crate::tools::{self, fetch, search, crawl_site};
 use crate::types::{
-    DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
-    search_args_schema, visit_page_args_schema,
+    CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
+    crawl_args_schema, search_args_schema, visit_page_args_schema,
 };
 use crate::{SERVER_NAME, VERSION};
 use serde::{Deserialize, Serialize};
@@ -197,6 +197,14 @@ impl DaedraHandler {
                         .to_string(),
                 ),
                 input_schema: visit_page_args_schema(),
+            },
+            McpTool {
+                name: "crawl_site".to_string(),
+                description: Some(
+                    "Crawl a website starting from a root URL. Discovers pages via sitemap.xml or link following, fetches up to max_pages concurrently, and returns Markdown content for each page."
+                        .to_string(),
+                ),
+                input_schema: crawl_args_schema(),
             },
         ]
     }
@@ -448,6 +456,42 @@ impl DaedraHandler {
                 }
             },
 
+            "crawl_site" => {
+                let args: CrawlArgs = match serde_json::from_value(arguments) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        return JsonRpcResponse::error(
+                            id,
+                            -32602,
+                            format!("Invalid crawl arguments: {}", e),
+                        );
+                    },
+                };
+
+                match crawl_site(args).await {
+                    Ok(result) => {
+                        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+                        JsonRpcResponse::success(
+                            id,
+                            json!({
+                                "content": [{ "type": "text", "text": text }],
+                                "isError": false
+                            }),
+                        )
+                    },
+                    Err(e) => {
+                        error!(error = %e, "Crawl failed");
+                        JsonRpcResponse::success(
+                            id,
+                            json!({
+                                "content": [{ "type": "text", "text": format!("Crawl failed: {}", e) }],
+                                "isError": true
+                            }),
+                        )
+                    },
+                }
+            },
+
             _ => JsonRpcResponse::error(id, -32601, format!("Unknown tool: {}", name)),
         }
     }
@@ -656,9 +700,10 @@ mod tests {
         let handler = DaedraHandler::new(config).unwrap();
         let tools = handler.list_tools();
 
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
         assert!(tools.iter().any(|t| t.name == "web_search"));
         assert!(tools.iter().any(|t| t.name == "visit_page"));
+        assert!(tools.iter().any(|t| t.name == "crawl_site"));
     }
 
     #[test]
@@ -733,7 +778,7 @@ mod tests {
 
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
     }
 
     #[tokio::test]

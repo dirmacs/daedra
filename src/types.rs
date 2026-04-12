@@ -596,6 +596,30 @@ pub fn visit_page_args_schema() -> serde_json::Value {
     })
 }
 
+pub fn crawl_args_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "root_url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Root URL of the site to crawl (sitemap or homepage)"
+            },
+            "max_pages": {
+                "type": "integer",
+                "description": "Maximum number of pages to fetch (default: 25)",
+                "default": 25
+            },
+            "concurrency": {
+                "type": "integer",
+                "description": "Maximum concurrent fetches (default: 4)",
+                "default": 4
+            }
+        },
+        "required": ["root_url"]
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
