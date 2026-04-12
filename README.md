@@ -6,7 +6,7 @@
 
 <p align="center">
   Self-contained web search MCP server. Rust. 7 backends. Works from any IP.<br>
-  No API keys required. No Docker. No Python.
+  Single binary. Automatic backend fallback. Zero configuration for basic search.
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@ Every major search engine (Google, Bing, DuckDuckGo, Brave) blocks datacenter/VP
 Serper (API) → Tavily (API) → Bing → Wikipedia → StackOverflow → GitHub → DuckDuckGo
 ```
 
-No Docker. No Python. No SearXNG. Pure Rust. Daedra IS the search infrastructure.
+Pure Rust. If one backend is blocked or rate-limited, the next one takes over automatically.
 
 ## Install
 
