@@ -8,8 +8,8 @@ use daedra::{
     DaedraResult, SERVER_NAME, VERSION,
     cache::CacheConfig,
     server::{DaedraServer, ServerConfig, TransportType},
-    tools::{fetch, search},
-    types::{SafeSearchLevel, SearchArgs, SearchOptions, VisitPageArgs},
+    tools::{crawl_site, fetch, search},
+    types::{CrawlArgs, SafeSearchLevel, SearchArgs, SearchOptions, VisitPageArgs},
 };
 use std::time::Duration;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -120,6 +120,20 @@ enum Commands {
         /// Include images in output
         #[arg(long)]
         include_images: bool,
+    },
+
+    /// Crawl a website and extract content from all discovered pages
+    Crawl {
+        /// Root URL to start crawling from
+        url: String,
+
+        /// Maximum number of pages to fetch
+        #[arg(short, long, default_value = "25")]
+        max_pages: usize,
+
+        /// Maximum concurrent fetches
+        #[arg(short, long, default_value = "4")]
+        concurrency: usize,
     },
 
     /// Show server information
@@ -426,6 +440,54 @@ async fn run_fetch(
     Ok(())
 }
 
+async fn run_crawl(
+    url: String,
+    max_pages: usize,
+    concurrency: usize,
+    format: OutputFormat,
+    no_color: bool,
+) -> DaedraResult<()> {
+    let args = CrawlArgs {
+        root_url: url,
+        max_pages,
+        concurrency,
+    };
+
+    let result = crawl_site(args).await?;
+
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        },
+        OutputFormat::JsonCompact => {
+            println!("{}", serde_json::to_string(&result)?);
+        },
+        OutputFormat::Pretty => {
+            if no_color {
+                println!("\nCrawl complete: {} pages, {} errors",
+                    result.summary.fetched, result.summary.failed);
+                for page in &result.pages {
+                    println!("\n--- {} ---", page.url);
+                    println!("{}", &page.markdown[..page.markdown.len().min(200)]);
+                }
+            } else {
+                print_section(&format!(
+                    "Crawl complete: {} pages, {} errors",
+                    result.summary.fetched.to_string().green(),
+                    result.summary.failed.to_string().red()
+                ));
+                for page in &result.pages {
+                    println!("\n{} {}", "→".bright_black(), page.url.bright_blue());
+                    println!("  {}", page.title.white().bold());
+                    println!("  {}...", &page.markdown[..page.markdown.len().min(150)]);
+                }
+            }
+        },
+    }
+
+    Ok(())
+}
+
 fn run_info(no_color: bool) {
     if no_color {
         println!("\nDaedra Server Information");
@@ -659,6 +721,12 @@ async fn main() {
             selector,
             include_images,
         } => run_fetch(url, selector, include_images, cli.format, cli.no_color).await,
+
+        Commands::Crawl {
+            url,
+            max_pages,
+            concurrency,
+        } => run_crawl(url, max_pages, concurrency, cli.format, cli.no_color).await,
 
         Commands::Info => {
             run_info(cli.no_color);
