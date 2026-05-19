@@ -8,7 +8,8 @@ use backoff::{ExponentialBackoff, future::retry};
 use dom_smoothie::Readability;
 use lazy_static::lazy_static;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::{error, info, instrument, warn};
 use url::Url;
@@ -128,6 +129,37 @@ enum FetchedContent {
     Html(String),
     Pdf(String),
     Binary { mime: String, size: usize },
+}
+
+/// Returns true for hrefs that should be skipped (#, javascript:, mailto:, tel:).
+fn is_skippable_href(href: &str) -> bool {
+    href.starts_with('#')
+        || href.starts_with("javascript:")
+        || href.starts_with("mailto:")
+        || href.starts_with("tel:")
+}
+
+/// Resolve a relative href against a base URL, returning None for skippable or unresolvable.
+fn resolve_href(base: &Url, href: &str) -> Option<Url> {
+    if is_skippable_href(href) {
+        return None;
+    }
+    base.join(href).ok()
+}
+
+/// Clean up link text: collapse whitespace, skip empty/short text.
+fn normalize_link_text(element: &ElementRef<'_>) -> Option<String> {
+    let text: String = element
+        .text()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.is_empty() || text.len() <= 2 {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// HTTP client for fetching pages
@@ -428,49 +460,27 @@ impl FetchClient {
     /// Extract links from the page
     fn extract_links(&self, document: &Html, base_url: &Url) -> Vec<PageLink> {
         let mut links = Vec::new();
-        let mut seen_urls = std::collections::HashSet::new();
+        let mut seen_urls = HashSet::new();
 
         for element in document.select(&LINK_SELECTOR) {
-            let href = match element.value().attr("href") {
-                Some(h) => h,
-                None => continue,
+            let Some(href) = element.value().attr("href") else {
+                continue;
             };
-
-            // Resolve relative URLs
-            let resolved_url = match base_url.join(href) {
-                Ok(url) => url.to_string(),
-                Err(_) => continue,
+            let Some(resolved) = resolve_href(base_url, href) else {
+                continue;
             };
-
-            // Skip duplicates, anchors, and non-http(s) URLs
-            if seen_urls.contains(&resolved_url)
-                || href.starts_with('#')
-                || href.starts_with("javascript:")
-                || href.starts_with("mailto:")
-                || href.starts_with("tel:")
-            {
+            if !seen_urls.insert(resolved.to_string()) {
                 continue;
             }
-
-            seen_urls.insert(resolved_url.clone());
-
-            let text = element
-                .text()
-                .collect::<String>()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            // Only include links with meaningful text
-            if !text.is_empty() && text.len() > 2 {
-                links.push(PageLink {
-                    text,
-                    url: resolved_url,
-                });
-            }
+            let Some(text) = normalize_link_text(&element) else {
+                continue;
+            };
+            links.push(PageLink {
+                text,
+                url: resolved.to_string(),
+            });
         }
 
-        // Limit to first 50 links
         links.truncate(50);
         links
     }

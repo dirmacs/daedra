@@ -364,137 +364,139 @@ impl DaedraHandler {
         }
     }
 
+    async fn handle_web_search(&self, id: Option<Value>, arguments: Value) -> JsonRpcResponse {
+        let args: SearchArgs = match serde_json::from_value(arguments) {
+            Ok(a) => a,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    id,
+                    -32602,
+                    format!("Invalid search arguments: {}", e),
+                );
+            },
+        };
+
+        match self.execute_search(args).await {
+            Ok(response) => {
+                let text = serde_json::to_string_pretty(&response).unwrap_or_default();
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": text }],
+                        "isError": false
+                    }),
+                )
+            },
+            Err(e) => {
+                error!(error = %e, "Search failed");
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": format!("Search failed: {}", e) }],
+                        "isError": true
+                    }),
+                )
+            },
+        }
+    }
+
+    async fn handle_visit_page(&self, id: Option<Value>, arguments: Value) -> JsonRpcResponse {
+        let args: VisitPageArgs = match serde_json::from_value(arguments) {
+            Ok(a) => a,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    id,
+                    -32602,
+                    format!("Invalid fetch arguments: {}", e),
+                );
+            },
+        };
+
+        if !fetch::is_valid_url(&args.url) {
+            return JsonRpcResponse::success(
+                id,
+                json!({
+                    "content": [{ "type": "text", "text": "Invalid URL: must be HTTP or HTTPS" }],
+                    "isError": true
+                }),
+            );
+        }
+
+        match self.execute_fetch(args).await {
+            Ok(content) => {
+                let output = format!(
+                    "# {}\n\n**URL:** {}\n**Fetched:** {}\n**Words:** {}\n\n---\n\n{}",
+                    content.title,
+                    content.url,
+                    content.timestamp,
+                    content.word_count,
+                    content.content
+                );
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": output }],
+                        "isError": false
+                    }),
+                )
+            },
+            Err(e) => {
+                error!(error = %e, "Fetch failed");
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": format!("Failed to fetch page: {}", e) }],
+                        "isError": true
+                    }),
+                )
+            },
+        }
+    }
+
+    async fn handle_crawl_site(&self, id: Option<Value>, arguments: Value) -> JsonRpcResponse {
+        let args: CrawlArgs = match serde_json::from_value(arguments) {
+            Ok(a) => a,
+            Err(e) => {
+                return JsonRpcResponse::error(
+                    id,
+                    -32602,
+                    format!("Invalid crawl arguments: {}", e),
+                );
+            },
+        };
+
+        match crawl_site(args).await {
+            Ok(result) => {
+                let text = serde_json::to_string_pretty(&result).unwrap_or_default();
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": text }],
+                        "isError": false
+                    }),
+                )
+            },
+            Err(e) => {
+                error!(error = %e, "Crawl failed");
+                JsonRpcResponse::success(
+                    id,
+                    json!({
+                        "content": [{ "type": "text", "text": format!("Crawl failed: {}", e) }],
+                        "isError": true
+                    }),
+                )
+            },
+        }
+    }
+
     /// Call a specific tool
     async fn call_tool(&self, id: Option<Value>, name: &str, arguments: Value) -> JsonRpcResponse {
         info!(tool = %name, "Executing tool");
 
         match name {
-            "web_search" | "search_duckduckgo" => {
-                let args: SearchArgs = match serde_json::from_value(arguments) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        return JsonRpcResponse::error(
-                            id,
-                            -32602,
-                            format!("Invalid search arguments: {}", e),
-                        );
-                    },
-                };
-
-                match self.execute_search(args).await {
-                    Ok(response) => {
-                        let text = serde_json::to_string_pretty(&response).unwrap_or_default();
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": text }],
-                                "isError": false
-                            }),
-                        )
-                    },
-                    Err(e) => {
-                        error!(error = %e, "Search failed");
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": format!("Search failed: {}", e) }],
-                                "isError": true
-                            }),
-                        )
-                    },
-                }
-            },
-
-            "visit_page" => {
-                let args: VisitPageArgs = match serde_json::from_value(arguments) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        return JsonRpcResponse::error(
-                            id,
-                            -32602,
-                            format!("Invalid fetch arguments: {}", e),
-                        );
-                    },
-                };
-
-                // Validate URL
-                if !fetch::is_valid_url(&args.url) {
-                    return JsonRpcResponse::success(
-                        id,
-                        json!({
-                            "content": [{ "type": "text", "text": "Invalid URL: must be HTTP or HTTPS" }],
-                            "isError": true
-                        }),
-                    );
-                }
-
-                match self.execute_fetch(args).await {
-                    Ok(content) => {
-                        let output = format!(
-                            "# {}\n\n**URL:** {}\n**Fetched:** {}\n**Words:** {}\n\n---\n\n{}",
-                            content.title,
-                            content.url,
-                            content.timestamp,
-                            content.word_count,
-                            content.content
-                        );
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": output }],
-                                "isError": false
-                            }),
-                        )
-                    },
-                    Err(e) => {
-                        error!(error = %e, "Fetch failed");
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": format!("Failed to fetch page: {}", e) }],
-                                "isError": true
-                            }),
-                        )
-                    },
-                }
-            },
-
-            "crawl_site" => {
-                let args: CrawlArgs = match serde_json::from_value(arguments) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        return JsonRpcResponse::error(
-                            id,
-                            -32602,
-                            format!("Invalid crawl arguments: {}", e),
-                        );
-                    },
-                };
-
-                match crawl_site(args).await {
-                    Ok(result) => {
-                        let text = serde_json::to_string_pretty(&result).unwrap_or_default();
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": text }],
-                                "isError": false
-                            }),
-                        )
-                    },
-                    Err(e) => {
-                        error!(error = %e, "Crawl failed");
-                        JsonRpcResponse::success(
-                            id,
-                            json!({
-                                "content": [{ "type": "text", "text": format!("Crawl failed: {}", e) }],
-                                "isError": true
-                            }),
-                        )
-                    },
-                }
-            },
-
+            "web_search" | "search_duckduckgo" => self.handle_web_search(id, arguments).await,
+            "visit_page" => self.handle_visit_page(id, arguments).await,
+            "crawl_site" => self.handle_crawl_site(id, arguments).await,
             _ => JsonRpcResponse::error(id, -32601, format!("Unknown tool: {}", name)),
         }
     }

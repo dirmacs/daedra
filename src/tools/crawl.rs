@@ -52,48 +52,58 @@ lazy_static! {
     static ref ANCHOR_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
 }
 
+async fn fetch_sitemap_body(client: &Client, url: &Url) -> Option<String> {
+    let resp = match client
+        .get(url.clone())
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("sitemap probe {} failed: {}", url, e);
+            return None;
+        }
+    };
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    match resp.text().await {
+        Ok(b) if b.len() <= SITEMAP_MAX_BYTES => Some(b),
+        Ok(_) => {
+            warn!(
+                "sitemap {} exceeded {} bytes, skipping",
+                url, SITEMAP_MAX_BYTES
+            );
+            None
+        }
+        Err(e) => {
+            warn!("sitemap {} body read failed: {}", url, e);
+            None
+        }
+    }
+}
+
+async fn probe_sitemap_candidate(client: &Client, root: &Url, path: &str) -> Option<Vec<Url>> {
+    let url = root.join(path).ok()?;
+    let body = fetch_sitemap_body(client, &url).await?;
+    let urls = parse_sitemap(&body);
+    if urls.is_empty() {
+        None
+    } else {
+        info!("sitemap {} yielded {} URLs", url, urls.len());
+        Some(urls)
+    }
+}
+
 /// Try each well-known sitemap path under `root` and return the first one
 /// that parses to a non-empty URL list. Returns `Ok(None)` if every candidate
 /// is missing, malformed, or empty (fallback to HTML anchor discovery).
 async fn discover_sitemap(client: &Client, root: &Url) -> DaedraResult<Option<Vec<Url>>> {
     for candidate in SITEMAP_CANDIDATES {
-        let url = match root.join(candidate) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-
-        let resp = match client
-            .get(url.clone())
-            .header("User-Agent", USER_AGENT)
-            .send()
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!("sitemap probe {} failed: {}", url, e);
-                continue;
-            }
-        };
-
-        if !resp.status().is_success() {
-            continue;
-        }
-
-        let body = match resp.text().await {
-            Ok(b) if b.len() <= SITEMAP_MAX_BYTES => b,
-            Ok(_) => {
-                warn!("sitemap {} exceeded {} bytes, skipping", url, SITEMAP_MAX_BYTES);
-                continue;
-            }
-            Err(e) => {
-                warn!("sitemap {} body read failed: {}", url, e);
-                continue;
-            }
-        };
-
-        let urls = parse_sitemap(&body);
-        if !urls.is_empty() {
-            info!("sitemap {} yielded {} URLs", url, urls.len());
+        if let Some(urls) = probe_sitemap_candidate(client, root, candidate).await {
             return Ok(Some(urls));
         }
     }
@@ -181,6 +191,14 @@ async fn discover_via_anchors(client: &Client, root: &Url, cap: usize) -> Daedra
     Ok(seen)
 }
 
+fn clamp_crawl_args(max_pages: usize, concurrency: usize) -> (usize, usize) {
+    (max_pages.max(1).min(500), concurrency.max(1).min(16))
+}
+
+fn rank_urls_by_path_length(urls: &mut [Url]) {
+    urls.sort_by_key(|u| u.path().len());
+}
+
 /// Walk a site deeply, returning extracted page content for each URL.
 ///
 /// The caller supplies a URL and a page budget. daedra finds the URLs
@@ -192,8 +210,7 @@ pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
     let root = Url::parse(&args.root_url)
         .map_err(|e| DaedraError::InvalidArguments(format!("invalid root_url: {}", e)))?;
 
-    let max_pages = args.max_pages.max(1).min(500);
-    let concurrency = args.concurrency.max(1).min(16);
+    let (max_pages, concurrency) = clamp_crawl_args(args.max_pages, args.concurrency);
 
     let client = Client::builder()
         .user_agent(USER_AGENT)
@@ -214,7 +231,7 @@ pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
 
     // 2) cap + deterministic order (shortest-path first as a weak relevance
     // heuristic — the consumer is expected to re-rank with an LLM if needed)
-    candidates.sort_by_key(|u| u.path().len());
+    rank_urls_by_path_length(&mut candidates);
     candidates.truncate(max_pages);
 
     info!(

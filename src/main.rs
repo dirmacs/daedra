@@ -175,6 +175,211 @@ impl From<SafeSearchOption> for SafeSearchLevel {
     }
 }
 
+
+impl Commands {
+    async fn run(
+        self,
+        format: OutputFormat,
+        verbose: bool,
+        quiet: bool,
+        no_color: bool,
+    ) -> DaedraResult<()> {
+        match self {
+            Commands::Serve {
+                transport,
+                port,
+                host,
+                no_cache,
+                cache_ttl,
+            } => {
+                if verbose
+                    && !quiet
+                    && !matches!(format, OutputFormat::Json | OutputFormat::JsonCompact)
+                    && matches!(transport, TransportOption::Sse)
+                {
+                    print_banner();
+                }
+                run_serve(transport, port, host, no_cache, cache_ttl).await
+            },
+
+            Commands::Search {
+                query,
+                num_results,
+                region,
+                safe_search,
+                time_range,
+            } => {
+                run_search(
+                    query,
+                    num_results,
+                    region,
+                    safe_search,
+                    time_range,
+                    format,
+                    no_color,
+                )
+                .await
+            },
+
+            Commands::Fetch {
+                url,
+                selector,
+                include_images,
+            } => run_fetch(url, selector, include_images, format, no_color).await,
+
+            Commands::Crawl {
+                url,
+                max_pages,
+                concurrency,
+            } => run_crawl(url, max_pages, concurrency, format, no_color).await,
+
+            Commands::Info => {
+                run_info(no_color);
+                Ok(())
+            },
+
+            Commands::Check => run_check(no_color).await,
+        }
+    }
+}
+
+struct CheckReporter {
+    no_color: bool,
+}
+
+impl CheckReporter {
+    fn new(no_color: bool) -> Self {
+        Self { no_color }
+    }
+
+    fn section(&self, title: &str) {
+        if self.no_color {
+            let message = match title {
+                "Configuration Check" => "
+Checking Daedra configuration...",
+                "Connectivity Test" => "
+Testing search functionality...",
+                _ => title,
+            };
+            println!("{message}");
+        } else {
+            print_section(title);
+        }
+    }
+
+    fn ok(&self, message: &str) {
+        if self.no_color {
+            println!("  [OK] {message}");
+        } else {
+            print_success(message);
+        }
+    }
+
+    fn fail(&self, message: &str) {
+        if self.no_color {
+            println!("  [FAIL] {message}");
+        } else {
+            print_error(message);
+        }
+    }
+
+    fn warn(&self, message: &str) {
+        if self.no_color {
+            println!("  [WARN] {message}");
+        } else {
+            println!("  {} {}", "⚠".yellow(), message.yellow());
+        }
+    }
+
+    fn backends(&self, backends: &[&str]) {
+        if self.no_color {
+            println!("  Backends: {}", backends.join(", "));
+        } else {
+            println!(
+                "  {} {} backends: {}",
+                "✓".green(),
+                backends.len(),
+                backends.join(", ")
+            );
+        }
+    }
+
+    fn summary(&self, all_ok: bool) {
+        println!();
+        if all_ok {
+            if self.no_color {
+                println!("All checks passed!");
+            } else {
+                println!("{}", "✓ All checks passed!".green().bold());
+            }
+        } else if self.no_color {
+            println!("Some checks failed. See above for details.");
+            std::process::exit(1);
+        } else {
+            println!(
+                "{}",
+                "✗ Some checks failed. See above for details.".red().bold()
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn check_search_client(reporter: &CheckReporter) -> bool {
+    match search::SearchClient::new() {
+        Ok(_) => {
+            reporter.ok("Search client initialized");
+            true
+        }
+        Err(e) => {
+            reporter.fail(&format!("Search client: {e}"));
+            false
+        }
+    }
+}
+
+fn check_fetch_client(reporter: &CheckReporter) -> bool {
+    match fetch::FetchClient::new() {
+        Ok(_) => {
+            reporter.ok("Fetch client initialized");
+            true
+        }
+        Err(e) => {
+            reporter.fail(&format!("Fetch client: {e}"));
+            false
+        }
+    }
+}
+
+async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
+    let test_args = SearchArgs {
+        query: "test".to_string(),
+        options: Some(SearchOptions {
+            num_results: 1,
+            ..Default::default()
+        }),
+    };
+
+    let provider = daedra::tools::SearchProvider::auto();
+    let backends = provider.available_backends();
+    reporter.backends(&backends);
+
+    match provider.search(&test_args).await {
+        Ok(response) => {
+            if response.data.is_empty() {
+                reporter.warn("Search returned no results");
+            } else {
+                reporter.ok("Search connectivity verified");
+            }
+            true
+        }
+        Err(e) => {
+            reporter.fail(&format!("Search test: {e}"));
+            false
+        }
+    }
+}
+
 /// Set up logging with configurable output destination
 ///
 /// # Arguments
@@ -540,125 +745,17 @@ fn run_info(no_color: bool) {
 }
 
 async fn run_check(no_color: bool) -> DaedraResult<()> {
-    if no_color {
-        println!("\nChecking Daedra configuration...");
-    } else {
-        print_section("Configuration Check");
-    }
+    let reporter = CheckReporter::new(no_color);
 
-    // Check if we can create clients
-    let search_result = search::SearchClient::new();
-    let fetch_result = fetch::FetchClient::new();
+    reporter.section("Configuration Check");
 
-    let mut all_ok = true;
+    let mut all_ok = check_search_client(&reporter);
+    all_ok &= check_fetch_client(&reporter);
 
-    match search_result {
-        Ok(_) => {
-            if no_color {
-                println!("  [OK] Search client initialized");
-            } else {
-                print_success("Search client initialized");
-            }
-        },
-        Err(e) => {
-            if no_color {
-                println!("  [FAIL] Search client: {}", e);
-            } else {
-                print_error(&format!("Search client: {}", e));
-            }
-            all_ok = false;
-        },
-    }
+    reporter.section("Connectivity Test");
+    all_ok &= check_search_connectivity(&reporter).await;
 
-    match fetch_result {
-        Ok(_) => {
-            if no_color {
-                println!("  [OK] Fetch client initialized");
-            } else {
-                print_success("Fetch client initialized");
-            }
-        },
-        Err(e) => {
-            if no_color {
-                println!("  [FAIL] Fetch client: {}", e);
-            } else {
-                print_error(&format!("Fetch client: {}", e));
-            }
-            all_ok = false;
-        },
-    }
-
-    // Test a simple search
-    if no_color {
-        println!("\nTesting search functionality...");
-    } else {
-        print_section("Connectivity Test");
-    }
-
-    let test_args = SearchArgs {
-        query: "test".to_string(),
-        options: Some(SearchOptions {
-            num_results: 1,
-            ..Default::default()
-        }),
-    };
-
-    let provider = daedra::tools::SearchProvider::auto();
-    let backends = provider.available_backends();
-    if no_color {
-        println!("  Backends: {}", backends.join(", "));
-    } else {
-        println!("  {} {} backends: {}", "✓".green(), backends.len(), backends.join(", "));
-    }
-
-    match provider.search(&test_args).await {
-        Ok(response) => {
-            if response.data.is_empty() {
-                if no_color {
-                    println!("  [WARN] Search returned no results");
-                } else {
-                    println!(
-                        "  {} {}",
-                        "⚠".yellow(),
-                        "Search returned no results".yellow()
-                    );
-                }
-            } else if no_color {
-                println!("  [OK] Search connectivity verified");
-            } else {
-                print_success("Search connectivity verified");
-            }
-        },
-        Err(e) => {
-            if no_color {
-                println!("  [FAIL] Search test: {}", e);
-            } else {
-                print_error(&format!("Search test: {}", e));
-            }
-            all_ok = false;
-        },
-    }
-
-    println!();
-
-    if all_ok {
-        if no_color {
-            println!("All checks passed!");
-        } else {
-            println!("{}", "✓ All checks passed!".green().bold());
-        }
-    } else {
-        if no_color {
-            println!("Some checks failed. See above for details.");
-        } else {
-            println!(
-                "{}",
-                "✗ Some checks failed. See above for details.".red().bold()
-            );
-        }
-        std::process::exit(1);
-    }
-
+    reporter.summary(all_ok);
     Ok(())
 }
 
@@ -666,75 +763,19 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
 async fn main() {
     let cli = Cli::parse();
 
-    // Handle color settings
     if cli.no_color {
         colored::control::set_override(false);
     }
 
-    // Set up logging for serve command only
-    // For stdio transport, logs MUST go to stderr to avoid corrupting the JSON-RPC stream
     if let Commands::Serve { transport, .. } = &cli.command {
         let use_stderr = matches!(transport, TransportOption::Stdio);
         setup_logging(cli.verbose, use_stderr, cli.quiet);
     }
 
-    let result = match cli.command {
-        Commands::Serve {
-            transport,
-            port,
-            host,
-            no_cache,
-            cache_ttl,
-        } => {
-            // Only show banner for SSE transport (not stdio) and when verbose and not quiet
-            if cli.verbose
-                && !cli.quiet
-                && !matches!(cli.format, OutputFormat::Json | OutputFormat::JsonCompact)
-                && matches!(transport, TransportOption::Sse)
-            {
-                print_banner();
-            }
-            run_serve(transport, port, host, no_cache, cache_ttl).await
-        },
-
-        Commands::Search {
-            query,
-            num_results,
-            region,
-            safe_search,
-            time_range,
-        } => {
-            run_search(
-                query,
-                num_results,
-                region,
-                safe_search,
-                time_range,
-                cli.format,
-                cli.no_color,
-            )
-            .await
-        },
-
-        Commands::Fetch {
-            url,
-            selector,
-            include_images,
-        } => run_fetch(url, selector, include_images, cli.format, cli.no_color).await,
-
-        Commands::Crawl {
-            url,
-            max_pages,
-            concurrency,
-        } => run_crawl(url, max_pages, concurrency, cli.format, cli.no_color).await,
-
-        Commands::Info => {
-            run_info(cli.no_color);
-            Ok(())
-        },
-
-        Commands::Check => run_check(cli.no_color).await,
-    };
+    let result = cli
+        .command
+        .run(cli.format, cli.verbose, cli.quiet, cli.no_color)
+        .await;
 
     if let Err(e) = result {
         if cli.no_color {
