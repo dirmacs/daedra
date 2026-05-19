@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, instrument};
 
 /// MCP Protocol version
@@ -235,12 +235,15 @@ impl DaedraHandler {
         let enrich_count = 3.min(response.data.len());
         if enrich_count > 0 {
             let fetch_client = self.fetch_client.clone();
+            let enrich_semaphore = Arc::new(Semaphore::new(2));
             let futures: Vec<_> = response.data[..enrich_count].iter()
                 .filter(|r| r.description.len() < 100) // only enrich sparse results
                 .map(|r| {
                     let url = r.url.clone();
                     let client = fetch_client.clone();
+                    let semaphore = enrich_semaphore.clone();
                     async move {
+                        let _permit = semaphore.acquire_owned().await.unwrap();
                         let args = crate::types::VisitPageArgs {
                             url: url.clone(),
                             selector: None,

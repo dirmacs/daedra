@@ -73,6 +73,13 @@ uuid = { version = "1.19.0", features = ["v4", "serde"] }
 # Markdown conversion
 htmd = "0.5.0"
 
+# Readability-based article extraction
+dom_smoothie = "0.17"
+
+# MIME sniffing and PDF text extraction
+infer = "0.19"
+pdf-extract = "0.10"
+
 # HTTP server for SSE transport
 axum = { version = "0.8.7", features = ["macros"] }
 tower = "0.5.2"
