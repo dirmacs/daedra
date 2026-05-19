@@ -436,101 +436,101 @@ pub struct CrawlResult {
     pub errors: Vec<CrawlError>,
 }
 
+struct LangRange {
+    lang: &'static str,
+    ranges: &'static [(char, char)],
+}
+
+const LANG_RANGES: &[LangRange] = &[
+    LangRange {
+        lang: "zh",
+        ranges: &[('\u{4e00}', '\u{9fff}')],
+    },
+    LangRange {
+        lang: "ja",
+        ranges: &[('\u{3040}', '\u{30ff}')],
+    },
+    LangRange {
+        lang: "ko",
+        ranges: &[('\u{ac00}', '\u{d7af}')],
+    },
+    LangRange {
+        lang: "ru",
+        ranges: &[('\u{0400}', '\u{04ff}')],
+    },
+    LangRange {
+        lang: "ar",
+        ranges: &[('\u{0600}', '\u{06ff}')],
+    },
+];
+
 /// Detect language of a query using simple heuristics
 fn detect_language(query: &str) -> String {
-    // Check for Chinese characters
-    if query
-        .chars()
-        .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
-    {
-        return "zh".to_string();
+    for range in LANG_RANGES {
+        if query
+            .chars()
+            .any(|c| range.ranges.iter().any(|&(s, e)| c >= s && c <= e))
+        {
+            return range.lang.to_string();
+        }
     }
-
-    // Check for Japanese characters (Hiragana/Katakana)
-    if query
-        .chars()
-        .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c))
-    {
-        return "ja".to_string();
-    }
-
-    // Check for Korean characters
-    if query
-        .chars()
-        .any(|c| ('\u{ac00}'..='\u{d7af}').contains(&c))
-    {
-        return "ko".to_string();
-    }
-
-    // Check for Cyrillic
-    if query
-        .chars()
-        .any(|c| ('\u{0400}'..='\u{04ff}').contains(&c))
-    {
-        return "ru".to_string();
-    }
-
-    // Check for Arabic
-    if query
-        .chars()
-        .any(|c| ('\u{0600}'..='\u{06ff}').contains(&c))
-    {
-        return "ar".to_string();
-    }
-
-    // Default to English
     "en".to_string()
 }
 
+struct TopicRule {
+    topic: &'static str,
+    url_patterns: &'static [&'static str],
+    title_patterns: &'static [&'static str],
+    content_type: Option<ContentType>,
+}
+
+const TOPIC_RULES: &[TopicRule] = &[
+    TopicRule {
+        topic: "technology",
+        url_patterns: &["github.com", "stackoverflow.com", "gitlab.com"],
+        title_patterns: &["programming", "code"],
+        content_type: None,
+    },
+    TopicRule {
+        topic: "documentation",
+        url_patterns: &["docs.", "/docs/", "/documentation/"],
+        title_patterns: &["documentation", "api reference"],
+        content_type: None,
+    },
+    TopicRule {
+        topic: "news",
+        url_patterns: &["news.", "/news/"],
+        title_patterns: &[],
+        content_type: Some(ContentType::Article),
+    },
+    TopicRule {
+        topic: "academic",
+        url_patterns: &[".edu", "arxiv.org", "scholar.google"],
+        title_patterns: &["research", "study"],
+        content_type: None,
+    },
+];
+
 /// Detect topics from search results
 fn detect_topics(results: &[SearchResult]) -> Vec<String> {
-    use std::collections::HashSet;
-
-    let mut topics = HashSet::new();
-
+    let mut topics = std::collections::HashSet::new();
     for result in results {
-        let lower_title = result.title.to_lowercase();
         let lower_url = result.url.to_lowercase();
-
-        // Technology indicators
-        if lower_url.contains("github.com")
-            || lower_url.contains("stackoverflow.com")
-            || lower_url.contains("gitlab.com")
-            || lower_title.contains("programming")
-            || lower_title.contains("code")
-        {
-            topics.insert("technology".to_string());
-        }
-
-        // Documentation indicators
-        if lower_url.contains("docs.")
-            || lower_url.contains("/docs/")
-            || lower_url.contains("/documentation/")
-            || lower_title.contains("documentation")
-            || lower_title.contains("api reference")
-        {
-            topics.insert("documentation".to_string());
-        }
-
-        // News indicators
-        if lower_url.contains("news.")
-            || lower_url.contains("/news/")
-            || result.metadata.content_type == ContentType::Article
-        {
-            topics.insert("news".to_string());
-        }
-
-        // Academic indicators
-        if lower_url.contains(".edu")
-            || lower_url.contains("arxiv.org")
-            || lower_url.contains("scholar.google")
-            || lower_title.contains("research")
-            || lower_title.contains("study")
-        {
-            topics.insert("academic".to_string());
+        let lower_title = result.title.to_lowercase();
+        for rule in TOPIC_RULES {
+            let url_match = rule.url_patterns.iter().any(|p| lower_url.contains(p));
+            let title_match = rule
+                .title_patterns
+                .iter()
+                .any(|p| lower_title.contains(p));
+            let type_match = rule
+                .content_type
+                .map_or(true, |ct| result.metadata.content_type == ct);
+            if url_match || title_match || type_match {
+                topics.insert(rule.topic.to_string());
+            }
         }
     }
-
     topics.into_iter().collect()
 }
 

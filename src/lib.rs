@@ -62,6 +62,7 @@ pub mod cache;
 pub mod server;
 pub mod tools;
 pub mod types;
+pub mod url_classification;
 
 // Re-export commonly used items at crate root
 pub use cache::SearchCache;
