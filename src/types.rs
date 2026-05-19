@@ -50,6 +50,10 @@ pub enum DaedraError {
     #[error("Content extraction failed: {0}")]
     ExtractionError(String),
 
+    /// Unsupported content type for page extraction
+    #[error("Unsupported content type: {0}")]
+    UnsupportedContentType(String),
+
     /// Rate limit exceeded
     #[error("Rate limit exceeded, please try again later")]
     RateLimitExceeded,

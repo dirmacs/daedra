@@ -5,6 +5,7 @@
 
 use crate::types::{DaedraError, DaedraResult, PageContent, PageLink, VisitPageArgs};
 use backoff::{ExponentialBackoff, future::retry};
+use dom_smoothie::Readability;
 use lazy_static::lazy_static;
 use reqwest::Client;
 use scraper::{Html, Selector};
@@ -122,6 +123,13 @@ const SUSPICIOUS_TITLES: &[&str] = &[
     "verify you are human",
 ];
 
+/// Raw content returned from an HTTP fetch
+enum FetchedContent {
+    Html(String),
+    Pdf(String),
+    Binary { mime: String, size: usize },
+}
+
 /// HTTP client for fetching pages
 #[derive(Clone)]
 pub struct FetchClient {
@@ -157,52 +165,76 @@ impl FetchClient {
             ));
         }
 
-        // Fetch the page with retry
-        let html = self.fetch_with_retry(&args.url).await?;
-
-        // Parse and extract content
-        let document = Html::parse_document(&html);
-
-        // Check for bot protection
-        self.check_bot_protection(&document)?;
-
-        // Extract title
-        let title = self.extract_title(&document);
-
-        // Extract content
-        let content = self.extract_content(&document, args.selector.as_deref())?;
-
-        // Count words
-        let word_count = content.split_whitespace().count();
-
-        // Extract links if content is substantial
-        let links = if word_count >= 50 {
-            Some(self.extract_links(&document, &parsed_url))
-        } else {
-            None
-        };
-
+        let fetched = self.fetch_with_retry(&args.url).await?;
         let timestamp = chrono::Utc::now().to_rfc3339();
 
-        info!(
-            url = %args.url,
-            title = %title,
-            word_count = word_count,
-            "Page fetched successfully"
-        );
+        match fetched {
+            FetchedContent::Html(html) => {
+                let document = Html::parse_document(&html);
 
-        Ok(PageContent {
-            url: args.url.clone(),
-            title,
-            content,
-            timestamp,
-            word_count,
-            links,
-        })
+                self.check_bot_protection(&document)?;
+
+                let title = self.extract_title(&document);
+                let content = self.extract_content(
+                    &html,
+                    &document,
+                    &args.url,
+                    args.selector.as_deref(),
+                )?;
+
+                let word_count = word_count(&content);
+
+                let links = if word_count >= 50 {
+                    Some(self.extract_links(&document, &parsed_url))
+                } else {
+                    None
+                };
+
+                info!(
+                    url = %args.url,
+                    title = %title,
+                    word_count = word_count,
+                    "Page fetched successfully"
+                );
+
+                Ok(PageContent {
+                    url: args.url.clone(),
+                    title,
+                    content,
+                    timestamp,
+                    word_count,
+                    links,
+                })
+            }
+            FetchedContent::Pdf(text) => {
+                let content = text.trim().to_string();
+                let word_count = word_count(&content);
+                let title = title_from_url(&args.url);
+
+                info!(
+                    url = %args.url,
+                    title = %title,
+                    word_count = word_count,
+                    "PDF fetched successfully"
+                );
+
+                Ok(PageContent {
+                    url: args.url.clone(),
+                    title,
+                    content,
+                    timestamp,
+                    word_count,
+                    links: None,
+                })
+            }
+            FetchedContent::Binary { mime, size } => Err(DaedraError::ExtractionError(format!(
+                "Unsupported content type: {mime} ({size} bytes)"
+            ))),
+        }
     }
 
     /// Fetch page content with retry logic
-    async fn fetch_with_retry(&self, url: &str) -> DaedraResult<String> {
+    async fn fetch_with_retry(&self, url: &str) -> DaedraResult<FetchedContent> {
         let backoff = ExponentialBackoff {
             max_elapsed_time: Some(Duration::from_secs(60)),
             ..Default::default()
@@ -238,7 +270,6 @@ impl FetchClient {
                 ))));
             }
 
-            // Check content length
             if let Some(content_length) = response.content_length()
                 && content_length as usize > MAX_CONTENT_SIZE
             {
@@ -247,10 +278,43 @@ impl FetchClient {
                 )));
             }
 
-            response.text().await.map_err(|e| {
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            let ct = normalize_content_type(&content_type);
+
+            if ct.contains("application/pdf") {
+                let bytes = response.bytes().await.map_err(|e| {
+                    error!(error = %e, url = %url, "Failed to read response body");
+                    backoff::Error::permanent(DaedraError::HttpError(e))
+                })?;
+                check_body_size(bytes.len())?;
+                return Ok(extract_pdf_content(&bytes)?);
+            }
+
+            if is_known_binary_content_type(&ct) {
+                let bytes = response.bytes().await.map_err(|e| {
+                    error!(error = %e, url = %url, "Failed to read response body");
+                    backoff::Error::permanent(DaedraError::HttpError(e))
+                })?;
+                check_body_size(bytes.len())?;
+                return Ok(FetchedContent::Binary {
+                    mime: ct,
+                    size: bytes.len(),
+                });
+            }
+
+            let bytes = response.bytes().await.map_err(|e| {
                 error!(error = %e, url = %url, "Failed to read response body");
                 backoff::Error::permanent(DaedraError::HttpError(e))
-            })
+            })?;
+            check_body_size(bytes.len())?;
+
+            classify_fetched_content(&content_type, &bytes).map_err(|e| backoff::Error::permanent(e))
         })
         .await
     }
@@ -299,46 +363,66 @@ impl FetchClient {
     }
 
     /// Extract and convert content to Markdown
-    fn extract_content(&self, document: &Html, selector: Option<&str>) -> DaedraResult<String> {
-        let html = if let Some(sel) = selector {
-            // Use custom selector
-            let custom_selector = Selector::parse(sel).map_err(|_| {
-                DaedraError::InvalidArguments(format!("Invalid CSS selector: {}", sel))
-            })?;
-
-            document.select(&custom_selector).next().map(|el| el.html())
+    fn extract_content(
+        &self,
+        html: &str,
+        document: &Html,
+        url: &str,
+        selector: Option<&str>,
+    ) -> DaedraResult<String> {
+        let content_html = if let Some(sel) = selector {
+            self.select_html_fragment(document, sel)?
+                .unwrap_or_else(|| self.select_body_html(document))
+        } else if let Some(readability_html) = extract_with_readability(html, url) {
+            readability_html
         } else {
-            // Try content selectors in order
-            let mut content_html = None;
-            for selector in CONTENT_SELECTORS.iter() {
-                if let Some(element) = document.select(selector).next() {
-                    content_html = Some(element.html());
-                    break;
-                }
+            let fragment = self
+                .select_first_content_selector(document)
+                .unwrap_or_else(|| self.select_body_html(document));
+            let preview = clean_markdown(&html_to_markdown(&fragment));
+            if word_count(&preview) < 10 {
+                self.select_body_html(document)
+            } else {
+                fragment
             }
-            content_html
         };
 
-        let html = html.unwrap_or_else(|| {
-            // Fall back to body content
-            document
-                .select(&Selector::parse("body").unwrap())
-                .next()
-                .map(|el| el.html())
-                .unwrap_or_default()
-        });
-
-        // Convert HTML to Markdown
-        let markdown = html_to_markdown(&html);
-
-        // Clean up the markdown
+        let markdown = html_to_markdown(&content_html);
         let cleaned = clean_markdown(&markdown);
 
-        if cleaned.split_whitespace().count() < 10 {
+        if word_count(&cleaned) < 10 {
             warn!("Extracted content is very short");
         }
 
         Ok(cleaned)
+    }
+
+    fn select_html_fragment(&self, document: &Html, sel: &str) -> DaedraResult<Option<String>> {
+        let custom_selector = Selector::parse(sel).map_err(|_| {
+            DaedraError::InvalidArguments(format!("Invalid CSS selector: {}", sel))
+        })?;
+
+        Ok(document
+            .select(&custom_selector)
+            .next()
+            .map(|el| el.html()))
+    }
+
+    fn select_first_content_selector(&self, document: &Html) -> Option<String> {
+        for selector in CONTENT_SELECTORS.iter() {
+            if let Some(element) = document.select(selector).next() {
+                return Some(element.html());
+            }
+        }
+        None
+    }
+
+    fn select_body_html(&self, document: &Html) -> String {
+        document
+            .select(&Selector::parse("body").unwrap())
+            .next()
+            .map(|el| el.html())
+            .unwrap_or_default()
     }
 
     /// Extract links from the page
@@ -396,6 +480,119 @@ impl Default for FetchClient {
     fn default() -> Self {
         Self::new().expect("Failed to create default fetch client")
     }
+}
+
+
+fn word_count(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+fn normalize_content_type(content_type: &str) -> String {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_lowercase()
+}
+
+fn is_known_binary_content_type(content_type: &str) -> bool {
+    let ct = normalize_content_type(content_type);
+    ct.starts_with("image/")
+        || ct.starts_with("video/")
+        || ct.starts_with("audio/")
+        || ct == "application/zip"
+        || ct == "application/gzip"
+        || ct == "application/x-tar"
+        || ct == "application/octet-stream"
+        || ct == "application/vnd.ms-excel"
+        || ct.starts_with("application/vnd.openxmlformats-")
+}
+
+fn is_binary_mime(mime: &str) -> bool {
+    is_known_binary_content_type(mime)
+        || mime == "application/pdf"
+        || mime.starts_with("application/vnd.")
+}
+
+fn bytes_to_utf8_string(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn check_body_size(size: usize) -> DaedraResult<()> {
+    if size > MAX_CONTENT_SIZE {
+        return Err(DaedraError::FetchError("Content too large".to_string()));
+    }
+    Ok(())
+}
+
+fn extract_pdf_content(bytes: &[u8]) -> DaedraResult<FetchedContent> {
+    let text = pdf_extract::extract_text_from_mem(bytes)
+        .map_err(|e| DaedraError::ExtractionError(e.to_string()))?;
+    Ok(FetchedContent::Pdf(text))
+}
+
+fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
+    if let Some(kind) = infer::get(bytes) {
+        let mime = kind.mime_type();
+        if mime == "application/pdf" {
+            return extract_pdf_content(bytes);
+        }
+        if mime == "text/html" || mime == "application/xhtml+xml" {
+            return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+        }
+        if is_binary_mime(mime) {
+            return Ok(FetchedContent::Binary {
+                mime: mime.to_string(),
+                size: bytes.len(),
+            });
+        }
+        if mime.starts_with("text/") {
+            return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+        }
+    }
+
+    let ct = normalize_content_type(content_type);
+    if ct.contains("text/html") {
+        return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+
+    if std::str::from_utf8(bytes).is_ok() {
+        return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+
+    Ok(FetchedContent::Binary {
+        mime: if ct.is_empty() {
+            "application/octet-stream".to_string()
+        } else {
+            ct
+        },
+        size: bytes.len(),
+    })
+}
+
+fn extract_with_readability(html: &str, url: &str) -> Option<String> {
+    let document_url = if url.is_empty() { None } else { Some(url) };
+    let mut readability = Readability::new(html, document_url, None).ok()?;
+    let article = readability.parse().ok()?;
+    if word_count(&article.text_content) >= 50 {
+        Some(article.content.to_string())
+    } else {
+        None
+    }
+}
+
+fn title_from_url(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .and_then(|parsed| {
+            parsed
+                .path_segments()
+                .and_then(|segments| segments.filter(|s| !s.is_empty()).last())
+                .map(str::to_string)
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| url.to_string())
 }
 
 /// Fetch a page and extract its content
@@ -496,8 +693,53 @@ fn clean_title(title: &str) -> String {
 }
 
 #[cfg(test)]
+impl FetchClient {
+    /// Same extraction path as [`FetchClient::fetch`] but without HTTP (integration fixtures).
+    pub fn extract_content_from_html_for_tests(
+        &self,
+        html: &str,
+        selector: Option<&str>,
+    ) -> DaedraResult<String> {
+        let document = Html::parse_document(html);
+        self.extract_content(html, &document, "", selector)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    const CELIACHIA_FIXTURE: &str = include_str!("../../tests/fixtures/celiachia.html");
+    const CELIACHIA_ARTICLE_MARKER: &str = "indagine 2023 su";
+
+    #[test]
+    #[ignore = "bug #6 fixed: dom_smoothie now extracts full article"]
+    fn characterization_issue_6_celiachia_extract_content_low_word_count() {
+        let client = FetchClient::default();
+        let content = client
+            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None)
+            .expect("extract");
+        let words = content.split_whitespace().count();
+        assert!(
+            words < 50,
+            "issue #6 characterization: expected <50 words, got {words}"
+        );
+        assert!(!content.contains(CELIACHIA_ARTICLE_MARKER));
+    }
+
+    #[test]
+    fn fixed_issue_6_celiachia_extract_content_full_article() {
+        let client = FetchClient::default();
+        let content = client
+            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None)
+            .expect("extract");
+        let words = content.split_whitespace().count();
+        assert!(
+            words >= 50,
+            "issue #6 fix: expected >=50 words, got {words}"
+        );
+        assert!(content.contains(CELIACHIA_ARTICLE_MARKER));
+    }
 
     #[test]
     fn test_is_valid_url() {
