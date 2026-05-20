@@ -1008,6 +1008,60 @@ mod tests {
         assert_eq!(merged[1].url, "https://b/1");
     }
 
+    #[test]
+    fn test_merge_interleave_empty_sources() {
+        let merged = SearchProvider::merge_interleave_results(&[], 10);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_merge_interleave_single_source() {
+        let results: Vec<_> = (0..3)
+            .map(|i| test_search_result(&format!("https://only/{}", i), &format!("r{}", i)))
+            .collect();
+        let by_source = vec![("only".to_string(), results)];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].url, "https://only/0");
+        assert_eq!(merged[1].url, "https://only/1");
+        assert_eq!(merged[2].url, "https://only/2");
+    }
+
+    #[test]
+    fn test_merge_interleave_uneven_sources() {
+        let a: Vec<_> = (0..3)
+            .map(|i| test_search_result(&format!("https://a/{}", i), &format!("a{}", i)))
+            .collect();
+        let b = vec![test_search_result("https://b/0", "b0")];
+        let by_source = vec![("a".to_string(), a), ("b".to_string(), b)];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        assert_eq!(merged.len(), 4);
+        assert_eq!(merged[0].url, "https://a/0");
+        assert_eq!(merged[1].url, "https://b/0");
+        assert_eq!(merged[2].url, "https://a/1");
+        assert_eq!(merged[3].url, "https://a/2");
+    }
+
+    #[test]
+    fn test_merge_interleave_all_duplicates() {
+        let dup = test_search_result("https://dup", "dup");
+        let by_source = vec![
+            ("a".to_string(), vec![dup.clone()]),
+            ("b".to_string(), vec![dup]),
+        ];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].url, "https://dup");
+    }
+
+    #[test]
+    fn test_merge_interleave_target_zero() {
+        let results = vec![test_search_result("https://x/0", "r0")];
+        let by_source = vec![("x".to_string(), results)];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 0);
+        assert!(merged.is_empty());
+    }
+
     #[tokio::test]
     #[ignore = "network"]
     async fn test_handle_transient_error() {
