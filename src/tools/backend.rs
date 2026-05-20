@@ -258,11 +258,17 @@ impl SearchProvider {
         }
     }
 
+    const TRANSIENT_SUBSTRINGS: &[&str] = &["429", "timed out"];
+
     fn is_transient(err: &DaedraError) -> bool {
-        matches!(
-            err,
-            DaedraError::HttpError(_) | DaedraError::Timeout
-        )
+        match err {
+            DaedraError::HttpError(_) | DaedraError::Timeout => true,
+            DaedraError::SearchError(msg) => {
+                let m = msg.to_lowercase();
+                Self::TRANSIENT_SUBSTRINGS.iter().any(|s| m.contains(s))
+            }
+            _ => false,
+        }
     }
 
 
@@ -904,6 +910,102 @@ mod tests {
         fn name(&self) -> &str {
             "mock-transient"
         }
+    }
+
+    #[test]
+    fn test_is_transient_rate_limit() {
+        assert!(SearchProvider::is_transient(&DaedraError::SearchError(
+            "HTTP 429 Too Many Requests".to_string(),
+        )));
+    }
+
+    #[test]
+    fn test_is_transient_timeout() {
+        assert!(SearchProvider::is_transient(&DaedraError::SearchError(
+            "connection timed out".to_string(),
+        )));
+    }
+
+    #[test]
+    fn test_is_non_retryable_bot_protection() {
+        assert!(SearchProvider::is_non_retryable(
+            &DaedraError::BotProtectionDetected,
+        ));
+    }
+
+    #[test]
+    fn test_handle_successful_result_records_health() {
+        use crate::types::SearchOptions;
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        health.record_failure();
+        health.record_failure();
+        let opts = SearchOptions::default();
+        let ok = Ok(SearchResponse::new(
+            "q".to_string(),
+            vec![test_search_result("https://ok", "ok")],
+            &opts,
+        ));
+        let (_name, _) =
+            SearchProvider::handle_successful_result("backend".to_string(), ok, Some(health.clone()));
+        assert!(health.is_available());
+    }
+
+    #[test]
+    fn test_handle_non_retryable_records_failure() {
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        health.record_failure();
+        health.record_failure();
+        let err = Err(DaedraError::BotProtectionDetected);
+        let (_name, _) =
+            SearchProvider::handle_non_retryable("backend".to_string(), err, Some(health.clone()));
+        assert!(!health.is_available());
+    }
+
+    #[test]
+    fn test_handle_unrecoverable_records_failure() {
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        health.record_failure();
+        health.record_failure();
+        let err = Err(DaedraError::SearchError("unknown failure".to_string()));
+        let (_name, _) = SearchProvider::handle_unrecoverable_error(
+            "backend".to_string(),
+            err,
+            Some(health.clone()),
+        );
+        assert!(!health.is_available());
+    }
+
+    #[test]
+    fn test_merge_interleave_results_empty() {
+        let merged = SearchProvider::merge_interleave_results(&[], 10);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_merge_interleave_results_single_source() {
+        let results: Vec<_> = (0..3)
+            .map(|i| test_search_result(&format!("https://only/{}", i), &format!("r{}", i)))
+            .collect();
+        let by_source = vec![("only".to_string(), results.clone())];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].url, "https://only/0");
+        assert_eq!(merged[1].url, "https://only/1");
+        assert_eq!(merged[2].url, "https://only/2");
+    }
+
+    #[test]
+    fn test_merge_interleave_results_multiple_sources() {
+        let a1 = test_search_result("https://a/1", "a1");
+        let b1 = test_search_result("https://b/1", "b1");
+        let by_source = vec![
+            ("a".to_string(), vec![a1.clone()]),
+            ("b".to_string(), vec![b1.clone()]),
+        ];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 2);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].url, "https://a/1");
+        assert_eq!(merged[1].url, "https://b/1");
     }
 
     #[tokio::test]

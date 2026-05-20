@@ -179,6 +179,39 @@ impl From<SafeSearchOption> for SafeSearchLevel {
 }
 
 
+fn safe_search_from_u8(v: u8) -> Option<SafeSearchLevel> {
+    match v {
+        0 => Some(SafeSearchLevel::Off),
+        1 => Some(SafeSearchLevel::Moderate),
+        2 => Some(SafeSearchLevel::Strict),
+        _ => None,
+    }
+}
+
+fn check_section_message(title: &str) -> String {
+    match title {
+        "Configuration Check" => "
+Checking Daedra configuration...".to_string(),
+        "Connectivity Test" => "
+Testing search functionality...".to_string(),
+        _ => title.to_string(),
+    }
+}
+
+fn check_summary_message(all_ok: bool, no_color: bool) -> String {
+    if all_ok {
+        if no_color {
+            "All checks passed!".to_string()
+        } else {
+            "✓ All checks passed!".to_string()
+        }
+    } else if no_color {
+        "Some checks failed. See above for details.".to_string()
+    } else {
+        "✗ Some checks failed. See above for details.".to_string()
+    }
+}
+
 fn should_print_banner(
     verbose: bool,
     quiet: bool,
@@ -265,14 +298,7 @@ impl CheckReporter {
 
     fn section(&self, title: &str) {
         if self.no_color {
-            let message = match title {
-                "Configuration Check" => "
-Checking Daedra configuration...",
-                "Connectivity Test" => "
-Testing search functionality...",
-                _ => title,
-            };
-            println!("{message}");
+            println!("{}", check_section_message(title));
         } else {
             print_section(title);
         }
@@ -317,20 +343,18 @@ Testing search functionality...",
 
     fn summary(&self, all_ok: bool) {
         println!();
+        let message = check_summary_message(all_ok, self.no_color);
         if all_ok {
             if self.no_color {
-                println!("All checks passed!");
+                println!("{message}");
             } else {
-                println!("{}", "✓ All checks passed!".green().bold());
+                println!("{}", message.green().bold());
             }
         } else if self.no_color {
-            println!("Some checks failed. See above for details.");
+            println!("{message}");
             std::process::exit(1);
         } else {
-            println!(
-                "{}",
-                "✗ Some checks failed. See above for details.".red().bold()
-            );
+            println!("{}", message.red().bold());
             std::process::exit(1);
         }
     }
@@ -846,6 +870,40 @@ mod tests {
             OutputFormat::Json,
             TransportOption::Sse,
         ));
+    }
+
+    #[test]
+    fn test_check_reporter_section_output() {
+        assert_eq!(
+            check_section_message("Configuration Check"),
+            "
+Checking Daedra configuration..."
+        );
+        assert_eq!(
+            check_section_message("Connectivity Test"),
+            "
+Testing search functionality..."
+        );
+        assert_eq!(check_section_message("Custom"), "Custom");
+    }
+
+    #[test]
+    fn test_check_reporter_summary_output() {
+        assert_eq!(check_summary_message(true, true), "All checks passed!");
+        assert_eq!(
+            check_summary_message(false, true),
+            "Some checks failed. See above for details."
+        );
+        assert!(check_summary_message(true, false).contains("All checks passed"));
+        assert!(check_summary_message(false, false).contains("failed"));
+    }
+
+    #[test]
+    fn test_safe_search_from_u8() {
+        assert_eq!(safe_search_from_u8(0), Some(SafeSearchLevel::Off));
+        assert_eq!(safe_search_from_u8(1), Some(SafeSearchLevel::Moderate));
+        assert_eq!(safe_search_from_u8(2), Some(SafeSearchLevel::Strict));
+        assert_eq!(safe_search_from_u8(3), None);
     }
 }
 

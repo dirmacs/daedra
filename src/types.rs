@@ -511,22 +511,23 @@ const TOPIC_RULES: &[TopicRule] = &[
     },
 ];
 
+fn matches_topic_rule(result: &SearchResult, rule: &TopicRule) -> bool {
+    let lower_url = result.url.to_lowercase();
+    let lower_title = result.title.to_lowercase();
+    let url_match = rule.url_patterns.iter().any(|p| lower_url.contains(p));
+    let title_match = rule.title_patterns.iter().any(|p| lower_title.contains(p));
+    let type_match = rule
+        .content_type
+        .map_or(true, |ct| result.metadata.content_type == ct);
+    url_match || title_match || type_match
+}
+
 /// Detect topics from search results
 fn detect_topics(results: &[SearchResult]) -> Vec<String> {
     let mut topics = std::collections::HashSet::new();
     for result in results {
-        let lower_url = result.url.to_lowercase();
-        let lower_title = result.title.to_lowercase();
         for rule in TOPIC_RULES {
-            let url_match = rule.url_patterns.iter().any(|p| lower_url.contains(p));
-            let title_match = rule
-                .title_patterns
-                .iter()
-                .any(|p| lower_title.contains(p));
-            let type_match = rule
-                .content_type
-                .map_or(true, |ct| result.metadata.content_type == ct);
-            if url_match || title_match || type_match {
+            if matches_topic_rule(result, rule) {
                 topics.insert(rule.topic.to_string());
             }
         }
