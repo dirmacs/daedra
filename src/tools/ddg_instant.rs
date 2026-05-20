@@ -44,6 +44,42 @@ impl DdgInstantBackend {
     }
 }
 
+fn abstract_to_result(data: &DdgResponse) -> Option<SearchResult> {
+    if data.abstract_text.is_empty() {
+        return None;
+    }
+    Some(SearchResult {
+        title: data.heading.clone(),
+        url: data.abstract_url.clone(),
+        description: data.abstract_text.clone(),
+        metadata: ResultMetadata {
+            content_type: ContentType::Documentation,
+            source: "ddg-instant".to_string(),
+            favicon: None,
+            published_date: None,
+        },
+    })
+}
+
+fn topic_to_result(topic: &serde_json::Value) -> Option<SearchResult> {
+    let text = topic.get("Text")?.as_str()?;
+    let url = topic.get("FirstURL")?.as_str()?;
+    if url.starts_with("https://duckduckgo.com/c/") {
+        return None;
+    }
+    Some(SearchResult {
+        title: text.chars().take(80).collect(),
+        url: url.to_string(),
+        description: text.to_string(),
+        metadata: ResultMetadata {
+            content_type: ContentType::Documentation,
+            source: "ddg-instant".to_string(),
+            favicon: None,
+            published_date: None,
+        },
+    })
+}
+
 #[async_trait]
 impl SearchBackend for DdgInstantBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
@@ -65,41 +101,16 @@ impl SearchBackend for DdgInstantBackend {
 
         let mut results = Vec::new();
 
-        // Add the main abstract if present
-        if !data.abstract_text.is_empty() && !data.abstract_url.is_empty() {
-            results.push(SearchResult {
-                title: data.heading.clone(),
-                url: data.abstract_url,
-                description: data.abstract_text,
-                metadata: ResultMetadata {
-                    content_type: ContentType::Documentation,
-                    source: "ddg-instant".to_string(),
-                    favicon: None,
-                    published_date: None,
-                },
-            });
+        if let Some(result) = abstract_to_result(&data) {
+            results.push(result);
         }
 
-        // Add related topics
         for topic in &data.related_topics {
-            if results.len() >= opts.num_results { break; }
-            if let (Some(text), Some(url)) = (
-                topic.get("Text").and_then(|v| v.as_str()),
-                topic.get("FirstURL").and_then(|v| v.as_str()),
-            ) {
-                // Skip DDG internal category links
-                if url.starts_with("https://duckduckgo.com/c/") { continue; }
-                results.push(SearchResult {
-                    title: text.chars().take(80).collect(),
-                    url: url.to_string(),
-                    description: text.to_string(),
-                    metadata: ResultMetadata {
-                        content_type: ContentType::Documentation,
-                        source: "ddg-instant".to_string(),
-                        favicon: None,
-                        published_date: None,
-                    },
-                });
+            if results.len() >= opts.num_results {
+                break;
+            }
+            if let Some(result) = topic_to_result(topic) {
+                results.push(result);
             }
         }
 
@@ -119,17 +130,71 @@ mod tests {
         assert_eq!(DdgInstantBackend::new().name(), "ddg-instant");
     }
 
-    #[test]
-    fn test_ddg_response_deserialization() {
-        let json = r#"{
+    fn sample_ddg_response() -> DdgResponse {
+        serde_json::from_str(
+            r#"{
             "AbstractText": "Rust is a systems programming language.",
             "AbstractURL": "https://example.com/rust",
             "Heading": "Rust (programming language)",
             "RelatedTopics": [
                 {"Text": "Related topic", "FirstURL": "https://example.com/related"}
             ]
-        }"#;
-        let data: DdgResponse = serde_json::from_str(json).unwrap();
+        }"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_abstract_to_result_present() {
+        let data = sample_ddg_response();
+        let result = abstract_to_result(&data).unwrap();
+        assert_eq!(result.title, "Rust (programming language)");
+        assert_eq!(result.url, "https://example.com/rust");
+        assert_eq!(result.description, "Rust is a systems programming language.");
+    }
+
+    #[test]
+    fn test_abstract_to_result_empty() {
+        let data = DdgResponse {
+            abstract_text: String::new(),
+            abstract_url: "https://example.com".to_string(),
+            heading: "Heading".to_string(),
+            related_topics: vec![],
+        };
+        assert!(abstract_to_result(&data).is_none());
+    }
+
+    #[test]
+    fn test_topic_to_result_valid() {
+        let topic = serde_json::json!({
+            "Text": "Related topic",
+            "FirstURL": "https://example.com/related"
+        });
+        let result = topic_to_result(&topic).unwrap();
+        assert_eq!(result.title, "Related topic");
+        assert_eq!(result.url, "https://example.com/related");
+        assert_eq!(result.description, "Related topic");
+    }
+
+    #[test]
+    fn test_topic_to_result_ddg_category() {
+        let topic = serde_json::json!({
+            "Text": "Category",
+            "FirstURL": "https://duckduckgo.com/c/Programming"
+        });
+        assert!(topic_to_result(&topic).is_none());
+    }
+
+    #[test]
+    fn test_topic_to_result_missing_fields() {
+        assert!(topic_to_result(&serde_json::json!({"Text": "only text"})).is_none());
+        assert!(topic_to_result(&serde_json::json!({"FirstURL": "https://example.com"})).is_none());
+        assert!(topic_to_result(&serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn test_ddg_response_deserialize() {
+        let data = sample_ddg_response();
         assert_eq!(data.abstract_text, "Rust is a systems programming language.");
         assert_eq!(data.abstract_url, "https://example.com/rust");
         assert_eq!(data.heading, "Rust (programming language)");
