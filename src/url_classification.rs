@@ -66,3 +66,80 @@ pub fn classify_search_url(url: &str) -> ContentType {
     }
     ContentType::Article
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_docs() {
+        assert_eq!(
+            classify_search_url("https://docs.example.com/guide"),
+            ContentType::Documentation
+        );
+    }
+
+    #[test]
+    fn test_classify_github() {
+        assert_eq!(
+            classify_search_url("https://github.com/org/repo"),
+            ContentType::Documentation
+        );
+    }
+
+    #[test]
+    fn test_classify_social() {
+        assert_eq!(
+            classify_search_url("https://twitter.com/user"),
+            ContentType::Social
+        );
+    }
+
+    #[test]
+    fn test_classify_forum() {
+        assert_eq!(
+            classify_search_url("https://reddit.com/r/rust"),
+            ContentType::Forum
+        );
+    }
+
+    #[test]
+    fn test_classify_video() {
+        assert_eq!(
+            classify_search_url("https://youtube.com/watch?v=abc"),
+            ContentType::Video
+        );
+    }
+
+    #[test]
+    fn test_classify_shopping() {
+        assert_eq!(
+            classify_search_url("https://amazon.com/product"),
+            ContentType::Shopping
+        );
+    }
+
+    #[test]
+    fn test_classify_news() {
+        assert_eq!(
+            classify_search_url("https://news.example.com/story"),
+            ContentType::Article
+        );
+    }
+
+    #[test]
+    fn test_classify_unknown() {
+        assert_eq!(
+            classify_search_url("https://random-site.example.org/page"),
+            ContentType::Article
+        );
+    }
+
+    #[test]
+    fn test_classify_case_insensitive() {
+        assert_eq!(
+            classify_search_url("https://Twitter.COM/user"),
+            ContentType::Social
+        );
+    }
+}
