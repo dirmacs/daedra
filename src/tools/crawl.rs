@@ -153,31 +153,56 @@ pub fn parse_sitemap(body: &str) -> Vec<Url> {
     out
 }
 
-/// Extract same-origin anchor links from a parsed HTML document.
-pub(crate) fn extract_same_origin_links(doc: &Html, root: &Url, cap: usize) -> Vec<Url> {
+/// Resolve a relative `href` against `base`, returning `None` for invalid or skippable hrefs.
+fn resolve_absolute_url(base: &Url, href: &str) -> Option<Url> {
+    let href = href.trim();
+    if href.is_empty()
+        || href.starts_with('#')
+        || href.starts_with("javascript:")
+        || href.starts_with("mailto:")
+        || (href.starts_with(':') && !href.starts_with("//"))
+    {
+        return None;
+    }
+    let absolute = base.join(href).ok()?;
+    match absolute.scheme() {
+        "http" | "https" if absolute.host().is_some() => Some(absolute),
+        _ => None,
+    }
+}
+
+/// Check whether `url` shares the same origin as `base`.
+fn is_same_origin(url: &Url, base: &Url) -> bool {
+    url.origin() == base.origin()
+}
+
+/// Collect up to `cap` unique same-origin links from anchor elements in `doc`.
+fn collect_unique_same_origin_links(doc: &Html, base: &Url, cap: usize) -> Vec<Url> {
     let mut seen: Vec<Url> = Vec::new();
     for a in doc.select(&ANCHOR_SELECTOR) {
-        if let Some(href) = a.value().attr("href") {
-            let href = href.trim();
-            if href.is_empty() || href.starts_with('#') || href.starts_with("javascript:") {
-                continue;
-            }
-            let absolute = match root.join(href) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-            if absolute.origin() != root.origin() {
-                continue;
-            }
-            if seen.iter().all(|u| u != &absolute) {
-                seen.push(absolute);
-                if seen.len() >= cap {
-                    break;
-                }
-            }
+        let Some(href) = a.value().attr("href") else {
+            continue;
+        };
+        let Some(absolute) = resolve_absolute_url(base, href) else {
+            continue;
+        };
+        if !is_same_origin(&absolute, base) {
+            continue;
+        }
+        if seen.iter().any(|u| u == &absolute) {
+            continue;
+        }
+        seen.push(absolute);
+        if seen.len() >= cap {
+            break;
         }
     }
     seen
+}
+
+/// Extract same-origin anchor links from a parsed HTML document.
+pub(crate) fn extract_same_origin_links(doc: &Html, root: &Url, cap: usize) -> Vec<Url> {
+    collect_unique_same_origin_links(doc, root, cap)
 }
 
 /// Fall back to HTML anchor discovery when no sitemap is available.
@@ -514,6 +539,78 @@ mod tests {
         let urls = extract_same_origin_links(&doc, &root, 10);
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0].path(), "/ok");
+    }
+
+    #[test]
+    fn test_resolve_absolute_url_valid() {
+        let base = Url::parse("https://example.com").unwrap();
+        let url = resolve_absolute_url(&base, "/path").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/path");
+    }
+
+    #[test]
+    fn test_resolve_absolute_url_javascript() {
+        let base = Url::parse("https://example.com").unwrap();
+        assert!(resolve_absolute_url(&base, "javascript:alert(1)").is_none());
+    }
+
+    #[test]
+    fn test_resolve_absolute_url_mailto() {
+        let base = Url::parse("https://example.com").unwrap();
+        assert!(resolve_absolute_url(&base, "mailto:test").is_none());
+    }
+
+    #[test]
+    fn test_resolve_absolute_url_fragment() {
+        let base = Url::parse("https://example.com").unwrap();
+        assert!(resolve_absolute_url(&base, "#section").is_none());
+    }
+
+    #[test]
+    fn test_resolve_absolute_url_invalid() {
+        let base = Url::parse("https://example.com").unwrap();
+        assert!(resolve_absolute_url(&base, ":::bad").is_none());
+    }
+
+    #[test]
+    fn test_is_same_origin_true() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let other = Url::parse("https://example.com/other").unwrap();
+        assert!(is_same_origin(&other, &base));
+    }
+
+    #[test]
+    fn test_is_same_origin_false() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let other = Url::parse("https://other.com/page").unwrap();
+        assert!(!is_same_origin(&other, &base));
+    }
+
+    #[test]
+    fn test_collect_unique_same_origin_links() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(
+            r#"<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a><a href="https://evil.com/x">X</a>"#,
+        );
+        let urls = collect_unique_same_origin_links(&doc, &base, 10);
+        assert_eq!(urls.len(), 3);
+    }
+
+    #[test]
+    fn test_collect_unique_same_origin_links_cap() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(r#"<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a>"#);
+        let urls = collect_unique_same_origin_links(&doc, &base, 2);
+        assert_eq!(urls.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_unique_same_origin_links_dedup() {
+        let base = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(r#"<a href="/dup">1</a><a href="/dup">2</a>"#);
+        let urls = collect_unique_same_origin_links(&doc, &base, 10);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].path(), "/dup");
     }
 
 }

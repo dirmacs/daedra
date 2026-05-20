@@ -179,6 +179,18 @@ impl From<SafeSearchOption> for SafeSearchLevel {
 }
 
 
+fn should_print_banner(
+    verbose: bool,
+    quiet: bool,
+    format: OutputFormat,
+    transport: TransportOption,
+) -> bool {
+    verbose
+        && !quiet
+        && !matches!(format, OutputFormat::Json | OutputFormat::JsonCompact)
+        && matches!(transport, TransportOption::Sse)
+}
+
 impl Commands {
     async fn run(
         self,
@@ -195,11 +207,7 @@ impl Commands {
                 no_cache,
                 cache_ttl,
             } => {
-                if verbose
-                    && !quiet
-                    && !matches!(format, OutputFormat::Json | OutputFormat::JsonCompact)
-                    && matches!(transport, TransportOption::Sse)
-                {
+                if should_print_banner(verbose, quiet, format, transport) {
                     print_banner();
                 }
                 run_serve(transport, port, host, no_cache, cache_ttl).await
@@ -795,3 +803,49 @@ async fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_print_banner_verbose_sse() {
+        assert!(should_print_banner(
+            true,
+            false,
+            OutputFormat::Pretty,
+            TransportOption::Sse,
+        ));
+    }
+
+    #[test]
+    fn test_should_print_banner_quiet() {
+        assert!(!should_print_banner(
+            true,
+            true,
+            OutputFormat::Pretty,
+            TransportOption::Sse,
+        ));
+    }
+
+    #[test]
+    fn test_should_print_banner_stdio() {
+        assert!(!should_print_banner(
+            true,
+            false,
+            OutputFormat::Pretty,
+            TransportOption::Stdio,
+        ));
+    }
+
+    #[test]
+    fn test_should_print_banner_json_format() {
+        assert!(!should_print_banner(
+            true,
+            false,
+            OutputFormat::Json,
+            TransportOption::Sse,
+        ));
+    }
+}
+
