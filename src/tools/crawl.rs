@@ -442,6 +442,12 @@ mod tests {
     }
 
     #[test]
+    fn test_is_skippable_href_whitespace() {
+        // No trim — whitespace-only hrefs are not treated as empty.
+        assert!(!is_skippable_href("  "));
+    }
+
+    #[test]
     fn test_is_skippable_href_hash() {
         assert!(is_skippable_href("#section"));
     }
@@ -452,13 +458,19 @@ mod tests {
     }
 
     #[test]
+    fn test_is_skippable_href_javascript_caps() {
+        // Case-sensitive prefix check — only lowercase "javascript:" is skippable.
+        assert!(!is_skippable_href("JavaScript:alert(1)"));
+    }
+
+    #[test]
     fn test_is_skippable_href_mailto() {
         assert!(is_skippable_href("mailto:test@test.com"));
     }
 
     #[test]
     fn test_is_skippable_href_lone_colon() {
-        assert!(is_skippable_href(":invalid"));
+        assert!(is_skippable_href(":foo"));
     }
 
     #[test]
@@ -472,8 +484,14 @@ mod tests {
     }
 
     #[test]
-    fn test_is_skippable_href_https_url() {
+    fn test_is_skippable_href_full_url() {
         assert!(!is_skippable_href("https://example.com"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_tel() {
+        // crawl.rs does not skip tel: links (unlike fetch.rs).
+        assert!(!is_skippable_href("tel:+1234"));
     }
 
     #[test]
