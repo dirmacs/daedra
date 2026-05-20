@@ -854,4 +854,87 @@ mod tests {
         let data = response.unwrap();
         assert!(!data.data.is_empty(), "Should have at least 1 result");
     }
+
+    #[test]
+    fn test_record_health_outcome_success() {
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        health.record_failure();
+        health.record_failure();
+        assert!(health.is_available());
+        SearchProvider::record_health_outcome(&Some(health.clone()), true);
+        assert!(health.is_available());
+    }
+
+    #[test]
+    fn test_record_health_outcome_failure() {
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        health.record_failure();
+        health.record_failure();
+        SearchProvider::record_health_outcome(&Some(health.clone()), false);
+        assert!(!health.is_available());
+    }
+
+    #[test]
+    fn test_record_health_outcome_no_health() {
+        SearchProvider::record_health_outcome(&None, true);
+        SearchProvider::record_health_outcome(&None, false);
+    }
+
+    struct TransientThenOkBackend {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl SearchBackend for TransientThenOkBackend {
+        async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+            let n = self
+                .calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n == 0 {
+                return Err(DaedraError::Timeout);
+            }
+            let opts = args.options.clone().unwrap_or_default();
+            Ok(SearchResponse::new(
+                args.query.clone(),
+                vec![test_search_result("https://mock/1", "mock")],
+                &opts,
+            ))
+        }
+
+        fn name(&self) -> &str {
+            "mock-transient"
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_transient_error() {
+        let backend = TransientThenOkBackend {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        };
+        let health = Arc::new(BackendHealth::new(3, Duration::from_secs(30)));
+        let limiters = Arc::new(BackendRateLimiters::new());
+        let scraper_default = BackendRateLimiters::default_limiter();
+        let args = SearchArgs {
+            query: "transient-retry".to_string(),
+            options: None,
+        };
+        let first_err = backend.search(&args).await.unwrap_err();
+        assert!(SearchProvider::is_transient(&first_err));
+
+        let (_name, result) = SearchProvider::handle_transient_error(
+            &backend,
+            &args,
+            backend.name().to_string(),
+            Err(first_err),
+            Some(health.clone()),
+            &limiters,
+            &scraper_default,
+        )
+        .await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap().data.is_empty());
+        assert!(health.is_available());
+    }
+
 }
