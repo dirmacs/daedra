@@ -9,13 +9,52 @@ use crate::types::{
     SearchResult,
 };
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use std::time::Duration;
 use tracing::{info, warn};
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const BING_URL: &str = "https://www.bing.com/search";
+
+lazy_static! {
+    static ref RESULT_SELECTOR: Selector = Selector::parse("li.b_algo").unwrap();
+    static ref TITLE_SELECTOR: Selector = Selector::parse("h2 a").unwrap();
+    static ref SNIPPET_SELECTOR: Selector = Selector::parse(".b_caption p, .b_lineclamp2").unwrap();
+}
+
+fn extract_bing_result(element: &ElementRef) -> Option<SearchResult> {
+    let title_el = element.select(&TITLE_SELECTOR).next()?;
+
+    let title: String = title_el.text().collect();
+    let url = title_el.value().attr("href").unwrap_or_default();
+
+    if title.trim().is_empty() || !url.starts_with("http") {
+        return None;
+    }
+    if url.contains("bing.com/ck/") {
+        return None;
+    }
+
+    let description: String = element
+        .select(&SNIPPET_SELECTOR)
+        .next()
+        .map(|e| e.text().collect())
+        .unwrap_or_default();
+
+    Some(SearchResult {
+        title: title.trim().to_string(),
+        url: url.to_string(),
+        description: description.trim().to_string(),
+        metadata: ResultMetadata {
+            content_type: ContentType::Other,
+            source: "bing".to_string(),
+            favicon: None,
+            published_date: None,
+        },
+    })
+}
 
 pub struct BingBackend {
     client: Client,
@@ -34,44 +73,13 @@ impl BingBackend {
         Self { client }
     }
 
-    fn parse_results(&self, html: &str, max: usize) -> Vec<SearchResult> {
-        let doc = Html::parse_document(html);
-        let result_sel = Selector::parse("li.b_algo").unwrap();
-        let title_sel = Selector::parse("h2 a").unwrap();
-        let snippet_sel = Selector::parse(".b_caption p, .b_lineclamp2").unwrap();
-
-        let mut results = Vec::new();
-
-        for el in doc.select(&result_sel).take(max) {
-            let title_el = match el.select(&title_sel).next() {
-                Some(e) => e,
-                None => continue,
-            };
-
-            let title: String = title_el.text().collect();
-            let url = title_el.value().attr("href").unwrap_or_default().to_string();
-
-            if url.is_empty() || title.is_empty() { continue; }
-            if url.starts_with("/") || url.contains("bing.com/ck/") { continue; }
-
-            let description: String = el.select(&snippet_sel).next()
-                .map(|e| e.text().collect())
-                .unwrap_or_default();
-
-            results.push(SearchResult {
-                title: title.trim().to_string(),
-                url,
-                description: description.trim().to_string(),
-                metadata: ResultMetadata {
-                    content_type: ContentType::Other,
-                    source: "bing".to_string(),
-                    favicon: None,
-                    published_date: None,
-                },
-            });
-        }
-
-        results
+    fn parse_results(&self, html: &str, max_results: usize) -> Vec<SearchResult> {
+        let document = Html::parse_document(html);
+        document
+            .select(&RESULT_SELECTOR)
+            .filter_map(|e| extract_bing_result(&e))
+            .take(max_results)
+            .collect()
     }
 }
 
@@ -112,6 +120,60 @@ impl SearchBackend for BingBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn extract_from_result_html(html: &str) -> Option<SearchResult> {
+        let fragment = Html::parse_fragment(html);
+        let element = fragment.select(&RESULT_SELECTOR).next()?;
+        extract_bing_result(&element)
+    }
+
+    #[test]
+    fn test_extract_bing_result_valid() {
+        let html = r#"<li class="b_algo"><h2><a href="https://example.com">Title</a></h2><div class="b_caption"><p>Desc</p></div></li>"#;
+        let result = extract_from_result_html(html).unwrap();
+        assert_eq!(result.title, "Title");
+        assert_eq!(result.url, "https://example.com");
+        assert_eq!(result.description, "Desc");
+    }
+
+    #[test]
+    fn test_extract_bing_result_no_title() {
+        let html = r#"<li class="b_algo"><div class="b_caption"><p>Desc only</p></div></li>"#;
+        assert!(extract_from_result_html(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_bing_result_invalid_url() {
+        let html = r#"<li class="b_algo"><h2><a href="/not-http">Bad URL</a></h2></li>"#;
+        assert!(extract_from_result_html(html).is_none());
+    }
+
+    #[test]
+    fn test_parse_results_respects_max() {
+        let html = (0..5)
+            .map(|i| {
+                format!(
+                    r#"<li class="b_algo"><h2><a href="https://example{i}.com">Title {i}</a></h2></li>"#
+                )
+            })
+            .collect::<String>();
+        let b = BingBackend::new();
+        let results = b.parse_results(&html, 2);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url, "https://example0.com");
+        assert_eq!(results[1].url, "https://example1.com");
+    }
+
+    #[test]
+    fn test_parse_results_empty_html() {
+        let b = BingBackend::new();
+        assert!(b.parse_results("<html></html>", 10).is_empty());
+    }
+
+    #[test]
+    fn test_bing_backend_name() {
+        assert_eq!(BingBackend::new().name(), "bing");
+    }
 
     #[test]
     fn test_parse_empty() {
