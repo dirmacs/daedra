@@ -355,41 +355,13 @@ impl DaedraHandler {
     ) -> JsonRpcResponse {
         match method {
             "initialize" => JsonRpcResponse::success(id, self.get_server_info()),
-
-            "initialized" | "notifications/initialized" => {
-                // Notification acknowledgment - per MCP spec, notifications don't require responses
-                // but we return success for compatibility with clients that expect one
-                JsonRpcResponse::success(id, json!({}))
-            }
-
-            "tools/list" => {
-                let tools = self.list_tools();
-                JsonRpcResponse::success(id, json!({ "tools": tools }))
-            }
-
-            "tools/call" => {
-                let params = match params {
-                    Some(p) => p,
-                    None => {
-                        return JsonRpcResponse::error(
-                            id,
-                            -32602,
-                            "Missing parameters".to_string(),
-                        );
-                    }
-                };
-
-                let tool_name = params
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default();
-                let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
-
-                self.call_tool(id, tool_name, arguments).await
-            }
-
+            "initialized" | "notifications/initialized" => JsonRpcResponse::success(id, json!({})),
+            "tools/list" => JsonRpcResponse::success(id, json!({ "tools": self.list_tools() })),
+            "tools/call" => match parse_tool_call_params(params, id.clone()) {
+                Ok((name, args)) => self.call_tool(id, &name, args).await,
+                Err(resp) => resp,
+            },
             "ping" => JsonRpcResponse::success(id, json!({})),
-
             _ => JsonRpcResponse::error(
                 id,
                 -32601,
@@ -413,24 +385,12 @@ impl DaedraHandler {
         match self.execute_search(args).await {
             Ok(response) => {
                 let text = serde_json::to_string_pretty(&response).unwrap_or_default();
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": text }],
-                        "isError": false
-                    }),
-                )
-            },
+                tool_success_response(id, text)
+            }
             Err(e) => {
                 error!(error = %e, "Search failed");
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": format!("Search failed: {}", e) }],
-                        "isError": true
-                    }),
-                )
-            },
+                tool_error_response(id, &format!("Search failed: {}", e))
+            }
         }
     }
 
@@ -447,43 +407,15 @@ impl DaedraHandler {
         };
 
         if !fetch::is_valid_url(&args.url) {
-            return JsonRpcResponse::success(
-                id,
-                json!({
-                    "content": [{ "type": "text", "text": "Invalid URL: must be HTTP or HTTPS" }],
-                    "isError": true
-                }),
-            );
+            return tool_error_response(id, "Invalid URL: must be HTTP or HTTPS");
         }
 
         match self.execute_fetch(args).await {
-            Ok(content) => {
-                let output = format!(
-                    "# {}\n\n**URL:** {}\n**Fetched:** {}\n**Words:** {}\n\n---\n\n{}",
-                    content.title,
-                    content.url,
-                    content.timestamp,
-                    content.word_count,
-                    content.content
-                );
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": output }],
-                        "isError": false
-                    }),
-                )
-            },
+            Ok(content) => tool_success_response(id, format_page_result(&content)),
             Err(e) => {
                 error!(error = %e, "Fetch failed");
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": format!("Failed to fetch page: {}", e) }],
-                        "isError": true
-                    }),
-                )
-            },
+                tool_error_response(id, &format!("Failed to fetch page: {}", e))
+            }
         }
     }
 
@@ -502,24 +434,12 @@ impl DaedraHandler {
         match crawl_site(args).await {
             Ok(result) => {
                 let text = serde_json::to_string_pretty(&result).unwrap_or_default();
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": text }],
-                        "isError": false
-                    }),
-                )
-            },
+                tool_success_response(id, text)
+            }
             Err(e) => {
                 error!(error = %e, "Crawl failed");
-                JsonRpcResponse::success(
-                    id,
-                    json!({
-                        "content": [{ "type": "text", "text": format!("Crawl failed: {}", e) }],
-                        "isError": true
-                    }),
-                )
-            },
+                tool_error_response(id, &format!("Crawl failed: {}", e))
+            }
         }
     }
 
@@ -539,6 +459,64 @@ impl DaedraHandler {
     pub fn cache(&self) -> &SearchCache {
         &self.cache
     }
+}
+
+fn parse_tool_call_params(
+    params: Option<Value>,
+    id: Option<Value>,
+) -> Result<(String, Value), JsonRpcResponse> {
+    let params = match params {
+        Some(p) => p,
+        None => {
+            return Err(JsonRpcResponse::error(
+                id,
+                -32602,
+                "Missing parameters".to_string(),
+            ));
+        }
+    };
+    let tool_name = params
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
+    Ok((tool_name, arguments))
+}
+
+fn format_page_result(content: &PageContent) -> String {
+    format!(
+        "# {}
+
+**URL:** {}
+**Fetched:** {}
+**Words:** {}
+
+---
+
+{}",
+        content.title, content.url, content.timestamp, content.word_count, content.content
+    )
+}
+
+fn tool_error_response(id: Option<Value>, message: &str) -> JsonRpcResponse {
+    JsonRpcResponse::success(
+        id,
+        json!({
+            "content": [{ "type": "text", "text": message }],
+            "isError": true
+        }),
+    )
+}
+
+fn tool_success_response(id: Option<Value>, text: String) -> JsonRpcResponse {
+    JsonRpcResponse::success(
+        id,
+        json!({
+            "content": [{ "type": "text", "text": text }],
+            "isError": false
+        }),
+    )
 }
 
 /// Parse and handle one STDIO line; returns a response only for non-notification requests.
@@ -1156,6 +1134,101 @@ mod tests {
                     "name": "visit_page",
                     "arguments": {"url": "not-a-url"}
                 })),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], true);
+    }
+
+    #[test]
+    fn test_parse_tool_call_params_valid() {
+        let result = parse_tool_call_params(
+            Some(json!({"name": "web_search", "arguments": {}})),
+            Some(json!(1)),
+        );
+        assert!(result.is_ok());
+        let (name, args) = result.unwrap();
+        assert_eq!(name, "web_search");
+        assert_eq!(args, json!({}));
+    }
+
+    #[test]
+    fn test_parse_tool_call_params_missing() {
+        let result = parse_tool_call_params(None, Some(json!(1)));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.error.unwrap().code, -32602);
+    }
+
+    #[test]
+    fn test_parse_tool_call_params_no_name() {
+        let result = parse_tool_call_params(Some(json!({})), Some(json!(1)));
+        assert!(result.is_ok());
+        let (name, args) = result.unwrap();
+        assert_eq!(name, "");
+        assert_eq!(args, json!({}));
+    }
+
+    #[test]
+    fn test_parse_tool_call_params_with_args() {
+        let result = parse_tool_call_params(
+            Some(json!({
+                "name": "visit_page",
+                "arguments": {"url": "https://example.com"}
+            })),
+            Some(json!(1)),
+        );
+        assert!(result.is_ok());
+        let (name, args) = result.unwrap();
+        assert_eq!(name, "visit_page");
+        assert_eq!(args["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_tool_error_response_has_is_error() {
+        let response = tool_error_response(Some(json!(1)), "something went wrong");
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], true);
+        assert_eq!(
+            result["content"][0]["text"].as_str().unwrap(),
+            "something went wrong"
+        );
+    }
+
+    #[test]
+    fn test_tool_success_response_no_error() {
+        let response = tool_success_response(Some(json!(1)), "ok".to_string());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], false);
+        assert_eq!(result["content"][0]["text"].as_str().unwrap(), "ok");
+    }
+
+    #[test]
+    fn test_format_page_result() {
+        let content = PageContent {
+            url: "https://example.com".to_string(),
+            title: "Example".to_string(),
+            content: "Hello world".to_string(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            word_count: 2,
+            links: None,
+        };
+        let formatted = format_page_result(&content);
+        assert!(formatted.contains("Example"));
+        assert!(formatted.contains("https://example.com"));
+        assert!(formatted.contains("**Words:** 2"));
+        assert!(formatted.contains("Hello world"));
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_visit_page_valid_url() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_visit_page(
+                Some(json!(1)),
+                json!({"url": "https://example.com"}),
             )
             .await;
         assert!(response.error.is_none());
