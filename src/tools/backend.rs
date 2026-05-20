@@ -240,15 +240,19 @@ impl SearchProvider {
         Self::from_backends(backends)
     }
 
+    const NON_RETRYABLE_SUBSTRINGS: &[&str] = &[
+        "403",
+        "captcha",
+        "bot protection",
+        "bot detected",
+    ];
+
     fn is_non_retryable(err: &DaedraError) -> bool {
         match err {
             DaedraError::BotProtectionDetected | DaedraError::RateLimitExceeded => true,
             DaedraError::SearchError(msg) => {
                 let m = msg.to_lowercase();
-                m.contains("403")
-                    || m.contains("captcha")
-                    || m.contains("bot protection")
-                    || m.contains("bot detected")
+                Self::NON_RETRYABLE_SUBSTRINGS.iter().any(|s| m.contains(s))
             }
             _ => false,
         }
@@ -294,6 +298,19 @@ impl SearchProvider {
         (name, result)
     }
 
+    async fn retry_once(b: &dyn SearchBackend, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+        let mut backoff = ExponentialBackoff {
+            initial_interval: Duration::from_millis(400),
+            max_interval: Duration::from_secs(2),
+            max_elapsed_time: Some(Duration::from_secs(3)),
+            ..Default::default()
+        };
+        if let Some(delay) = backoff.next_backoff() {
+            tokio::time::sleep(delay).await;
+        }
+        b.search(args).await
+    }
+
     async fn handle_transient_error(
         b: &dyn SearchBackend,
         args: &SearchArgs,
@@ -307,16 +324,7 @@ impl SearchProvider {
             Self::record_health_outcome(&health, false);
             warn!(backend = %name, error = %e, "Backend transient error, retrying once");
         }
-        let mut backoff = ExponentialBackoff {
-            initial_interval: Duration::from_millis(400),
-            max_interval: Duration::from_secs(2),
-            max_elapsed_time: Some(Duration::from_secs(3)),
-            ..Default::default()
-        };
-        if let Some(delay) = backoff.next_backoff() {
-            tokio::time::sleep(delay).await;
-        }
-        let retry_result = b.search(args).await;
+        let retry_result = Self::retry_once(b, args).await;
         match &retry_result {
             Ok(r) if !r.data.is_empty() => Self::record_health_outcome(&health, true),
             Err(retry_err) if Self::is_non_retryable(retry_err) => {
@@ -465,31 +473,41 @@ impl SearchProvider {
         (by_source, any_success, tried)
     }
 
+    fn take_next_unseen<'a, I>(
+        queue: &mut std::iter::Peekable<I>,
+        seen: &mut std::collections::HashSet<String>,
+    ) -> Option<crate::types::SearchResult>
+    where
+        I: Iterator<Item = &'a crate::types::SearchResult>,
+    {
+        while let Some(r) = queue.next() {
+            if seen.insert(r.url.clone()) {
+                return Some(r.clone());
+            }
+        }
+        None
+    }
+
     fn merge_interleave_results(
         by_source: &[(String, Vec<crate::types::SearchResult>)],
         target_count: usize,
     ) -> Vec<crate::types::SearchResult> {
-        let mut merged: Vec<crate::types::SearchResult> = Vec::new();
-        let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut indices: Vec<usize> = vec![0; by_source.len()];
+        let mut merged = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut queues: Vec<_> = by_source.iter().map(|(_, r)| r.iter().peekable()).collect();
 
-        loop {
-            let mut added_this_round = false;
-            for (i, (_name, results)) in by_source.iter().enumerate() {
+        while merged.len() < target_count {
+            let mut added = false;
+            for q in &mut queues {
+                if let Some(r) = Self::take_next_unseen(q, &mut seen) {
+                    merged.push(r);
+                    added = true;
+                }
                 if merged.len() >= target_count {
                     break;
                 }
-                while indices[i] < results.len() {
-                    let r = &results[indices[i]];
-                    indices[i] += 1;
-                    if seen_urls.insert(r.url.clone()) {
-                        merged.push(r.clone());
-                        added_this_round = true;
-                        break;
-                    }
-                }
             }
-            if !added_this_round || merged.len() >= target_count {
+            if !added {
                 break;
             }
         }
@@ -675,6 +693,146 @@ mod tests {
     fn test_backend_rate_limiters_default() {
         let limiter = BackendRateLimiters::default_limiter();
         assert!(limiter.check_key(&"bing".to_string()).is_ok());
+    }
+
+    fn test_search_result(url: &str, title: &str) -> crate::types::SearchResult {
+        use crate::types::{ContentType, ResultMetadata, SearchResult};
+        SearchResult {
+            title: title.to_string(),
+            url: url.to_string(),
+            description: "desc".to_string(),
+            metadata: ResultMetadata {
+                content_type: ContentType::Other,
+                source: "test".to_string(),
+                favicon: None,
+                published_date: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_merge_interleave_results_basic() {
+        let a1 = test_search_result("https://a/1", "a1");
+        let a2 = test_search_result("https://a/2", "a2");
+        let b1 = test_search_result("https://b/1", "b1");
+        let b2 = test_search_result("https://b/2", "b2");
+        let by_source = vec![
+            ("a".to_string(), vec![a1.clone(), a2.clone()]),
+            ("b".to_string(), vec![b1.clone(), b2.clone()]),
+        ];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 4);
+        assert_eq!(merged.len(), 4);
+        assert_eq!(merged[0].url, "https://a/1");
+        assert_eq!(merged[1].url, "https://b/1");
+        assert_eq!(merged[2].url, "https://a/2");
+        assert_eq!(merged[3].url, "https://b/2");
+    }
+
+    #[test]
+    fn test_merge_interleave_results_dedup() {
+        let shared = test_search_result("https://dup", "dup");
+        let other = test_search_result("https://other", "other");
+        let by_source = vec![
+            ("a".to_string(), vec![shared.clone()]),
+            ("b".to_string(), vec![shared, other.clone()]),
+        ];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].url, "https://dup");
+        assert_eq!(merged[1].url, "https://other");
+    }
+
+    #[test]
+    fn test_merge_interleave_results_respects_target() {
+        let results: Vec<_> = (0..5)
+            .map(|i| test_search_result(&format!("https://x/{}", i), &format!("r{}", i)))
+            .collect();
+        let by_source = vec![("x".to_string(), results)];
+        let merged = SearchProvider::merge_interleave_results(&by_source, 3);
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn test_is_non_retryable_patterns() {
+        for msg in [
+            "HTTP 403 forbidden",
+            "CAPTCHA required",
+            "bot protection triggered",
+            "bot detected on page",
+        ] {
+            assert!(
+                SearchProvider::is_non_retryable(&DaedraError::SearchError(msg.to_string())),
+                "expected non-retryable: {msg}"
+            );
+        }
+        assert!(!SearchProvider::is_non_retryable(&DaedraError::Timeout));
+        assert!(!SearchProvider::is_non_retryable(&DaedraError::SearchError(
+            "connection reset".to_string()
+        )));
+    }
+
+    #[test]
+    fn test_categorize_results_all_success() {
+        use crate::types::SearchOptions;
+        let opts = SearchOptions::default();
+        let ok = |name: &str, url: &str| {
+            (
+                name.to_string(),
+                Ok(SearchResponse::new(
+                    "q".to_string(),
+                    vec![test_search_result(url, name)],
+                    &opts,
+                )),
+            )
+        };
+        let results = vec![ok("a", "https://a"), ok("b", "https://b")];
+        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        assert!(any_success);
+        assert_eq!(tried.len(), 2);
+        assert_eq!(by_source.len(), 2);
+    }
+
+    #[test]
+    fn test_categorize_results_all_failure() {
+        let results = vec![
+            (
+                "a".to_string(),
+                Err(DaedraError::SearchError("fail a".to_string())),
+            ),
+            (
+                "b".to_string(),
+                Err(DaedraError::SearchError("fail b".to_string())),
+            ),
+        ];
+        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        assert!(!any_success);
+        assert_eq!(tried.len(), 2);
+        assert!(by_source.is_empty());
+    }
+
+    #[test]
+    fn test_categorize_results_mixed() {
+        use crate::types::SearchOptions;
+        let opts = SearchOptions::default();
+        let results = vec![
+            (
+                "ok".to_string(),
+                Ok(SearchResponse::new(
+                    "q".to_string(),
+                    vec![test_search_result("https://ok", "ok")],
+                    &opts,
+                )),
+            ),
+            (
+                "fail".to_string(),
+                Err(DaedraError::SearchError("fail".to_string())),
+            ),
+        ];
+        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        assert!(any_success);
+        assert_eq!(tried.len(), 2);
+        assert_eq!(by_source.len(), 1);
+        assert_eq!(by_source[0].0, "ok");
     }
 
     #[tokio::test]
