@@ -9,7 +9,10 @@ use daedra::{
     cache::CacheConfig,
     server::{DaedraServer, ServerConfig, TransportType},
     tools::{crawl_site, fetch, search},
-    types::{CrawlArgs, SafeSearchLevel, SearchArgs, SearchOptions, VisitPageArgs},
+    types::{
+        CrawlArgs, CrawlResult, PageContent, SafeSearchLevel, SearchArgs, SearchOptions,
+        SearchResult, VisitPageArgs,
+    },
 };
 use std::time::Duration;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -494,6 +497,119 @@ async fn run_serve(
     server.run(transport_type).await
 }
 
+
+fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
+    if no_color {
+        println!("\nSearch Results for: {}", query);
+        println!("{}", "=".repeat(50));
+        println!("Found {} results in region '{}'", count, region);
+        println!();
+    } else {
+        print_section(&format!("Search Results for: {}", query.cyan()));
+        println!(
+            "Found {} results in region '{}'",
+            count.to_string().green(),
+            region.bright_blue()
+        );
+        println!();
+    }
+}
+
+fn print_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) {
+    if no_color {
+        println!("{}. {}", index + 1, result.title);
+        println!("   URL: {}", result.url);
+        println!("   {}", result.description);
+        println!(
+            "   Source: {} | Type: {:?}",
+            result.metadata.source, result.metadata.content_type
+        );
+        println!();
+    } else {
+        println!(
+            "{} {}",
+            format!("{}.", index + 1).bright_black(),
+            result.title.white().bold()
+        );
+        println!(
+            "   {} {}",
+            "URL:".bright_black(),
+            result.url.bright_blue().underline()
+        );
+        println!("   {}", result.description.bright_white());
+        println!(
+            "   {} {} {} {:?}",
+            "Source:".bright_black(),
+            result.metadata.source.yellow(),
+            "|".bright_black(),
+            result.metadata.content_type
+        );
+        println!();
+    }
+}
+
+fn print_page_content_pretty(content: &PageContent, no_color: bool) {
+    if no_color {
+        println!("\n{}", content.title);
+        println!("{}", "=".repeat(50));
+        println!("URL: {}", content.url);
+        println!("Fetched: {}", content.timestamp);
+        println!("Words: {}", content.word_count);
+        println!();
+        println!("{}", content.content);
+
+        if let Some(links) = &content.links {
+            println!("\nLinks found ({}):", links.len());
+            for link in links.iter().take(10) {
+                println!("  - {} ({})", link.text, link.url);
+            }
+        }
+    } else {
+        print_section(&content.title.white().bold().to_string());
+        print_info("URL", &content.url.bright_blue().underline().to_string());
+        print_info("Fetched", &content.timestamp);
+        print_info("Words", &content.word_count.to_string().green().to_string());
+        println!();
+        println!("{}", content.content);
+
+        if let Some(links) = &content.links {
+            print_section(&format!("Links found ({})", links.len()));
+            for link in links.iter().take(10) {
+                println!(
+                    "  {} {} {}",
+                    "→".bright_black(),
+                    link.text.white(),
+                    format!("({})", link.url).bright_blue()
+                );
+            }
+        }
+    }
+}
+
+fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
+    if no_color {
+        println!(
+            "\nCrawl complete: {} pages, {} errors",
+            result.summary.fetched, result.summary.failed
+        );
+        for page in &result.pages {
+            println!("\n--- {} ---", page.url);
+            println!("{}", &page.markdown[..page.markdown.len().min(200)]);
+        }
+    } else {
+        print_section(&format!(
+            "Crawl complete: {} pages, {} errors",
+            result.summary.fetched.to_string().green(),
+            result.summary.failed.to_string().red()
+        ));
+        for page in &result.pages {
+            println!("\n{} {}", "→".bright_black(), page.url.bright_blue());
+            println!("  {}", page.title.white().bold());
+            println!("  {}...", &page.markdown[..page.markdown.len().min(150)]);
+        }
+    }
+}
+
 async fn run_search(
     query: String,
     num_results: usize,
@@ -517,69 +633,24 @@ async fn run_search(
     let response = provider.search(&args).await?;
 
     match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&response)?);
-        },
-        OutputFormat::JsonCompact => {
-            println!("{}", serde_json::to_string(&response)?);
-        },
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
+        OutputFormat::JsonCompact => println!("{}", serde_json::to_string(&response)?),
         OutputFormat::Pretty => {
-            if no_color {
-                println!("\nSearch Results for: {}", query);
-                println!("{}", "=".repeat(50));
-                println!(
-                    "Found {} results in region '{}'",
-                    response.data.len(),
-                    response.metadata.search_context.region
-                );
-                println!();
-
-                for (i, result) in response.data.iter().enumerate() {
-                    println!("{}. {}", i + 1, result.title);
-                    println!("   URL: {}", result.url);
-                    println!("   {}", result.description);
-                    println!(
-                        "   Source: {} | Type: {:?}",
-                        result.metadata.source, result.metadata.content_type
-                    );
-                    println!();
-                }
-            } else {
-                print_section(&format!("Search Results for: {}", query.cyan()));
-                println!(
-                    "Found {} results in region '{}'",
-                    response.data.len().to_string().green(),
-                    response.metadata.search_context.region.bright_blue()
-                );
-                println!();
-
-                for (i, result) in response.data.iter().enumerate() {
-                    println!(
-                        "{} {}",
-                        format!("{}.", i + 1).bright_black(),
-                        result.title.white().bold()
-                    );
-                    println!(
-                        "   {} {}",
-                        "URL:".bright_black(),
-                        result.url.bright_blue().underline()
-                    );
-                    println!("   {}", result.description.bright_white());
-                    println!(
-                        "   {} {} {} {:?}",
-                        "Source:".bright_black(),
-                        result.metadata.source.yellow(),
-                        "|".bright_black(),
-                        result.metadata.content_type
-                    );
-                    println!();
-                }
+            print_search_header_pretty(
+                &query,
+                response.data.len(),
+                &response.metadata.search_context.region,
+                no_color,
+            );
+            for (i, result) in response.data.iter().enumerate() {
+                print_search_result_pretty(result, i, no_color);
             }
         },
     }
 
     Ok(())
 }
+
 
 async fn run_fetch(
     url: String,
@@ -597,53 +668,14 @@ async fn run_fetch(
     let content = fetch::fetch_page(&args).await?;
 
     match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&content)?);
-        },
-        OutputFormat::JsonCompact => {
-            println!("{}", serde_json::to_string(&content)?);
-        },
-        OutputFormat::Pretty => {
-            if no_color {
-                println!("\n{}", content.title);
-                println!("{}", "=".repeat(50));
-                println!("URL: {}", content.url);
-                println!("Fetched: {}", content.timestamp);
-                println!("Words: {}", content.word_count);
-                println!();
-                println!("{}", content.content);
-
-                if let Some(links) = content.links {
-                    println!("\nLinks found ({}):", links.len());
-                    for link in links.iter().take(10) {
-                        println!("  - {} ({})", link.text, link.url);
-                    }
-                }
-            } else {
-                print_section(&content.title.white().bold().to_string());
-                print_info("URL", &content.url.bright_blue().underline().to_string());
-                print_info("Fetched", &content.timestamp);
-                print_info("Words", &content.word_count.to_string().green().to_string());
-                println!();
-                println!("{}", content.content);
-
-                if let Some(links) = content.links {
-                    print_section(&format!("Links found ({})", links.len()));
-                    for link in links.iter().take(10) {
-                        println!(
-                            "  {} {} {}",
-                            "→".bright_black(),
-                            link.text.white(),
-                            format!("({})", link.url).bright_blue()
-                        );
-                    }
-                }
-            }
-        },
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&content)?),
+        OutputFormat::JsonCompact => println!("{}", serde_json::to_string(&content)?),
+        OutputFormat::Pretty => print_page_content_pretty(&content, no_color),
     }
 
     Ok(())
 }
+
 
 async fn run_crawl(
     url: String,
@@ -661,37 +693,14 @@ async fn run_crawl(
     let result = crawl_site(args).await?;
 
     match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&result)?);
-        },
-        OutputFormat::JsonCompact => {
-            println!("{}", serde_json::to_string(&result)?);
-        },
-        OutputFormat::Pretty => {
-            if no_color {
-                println!("\nCrawl complete: {} pages, {} errors",
-                    result.summary.fetched, result.summary.failed);
-                for page in &result.pages {
-                    println!("\n--- {} ---", page.url);
-                    println!("{}", &page.markdown[..page.markdown.len().min(200)]);
-                }
-            } else {
-                print_section(&format!(
-                    "Crawl complete: {} pages, {} errors",
-                    result.summary.fetched.to_string().green(),
-                    result.summary.failed.to_string().red()
-                ));
-                for page in &result.pages {
-                    println!("\n{} {}", "→".bright_black(), page.url.bright_blue());
-                    println!("  {}", page.title.white().bold());
-                    println!("  {}...", &page.markdown[..page.markdown.len().min(150)]);
-                }
-            }
-        },
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result)?),
+        OutputFormat::JsonCompact => println!("{}", serde_json::to_string(&result)?),
+        OutputFormat::Pretty => print_crawl_result_pretty(&result, no_color),
     }
 
     Ok(())
 }
+
 
 fn run_info(no_color: bool) {
     if no_color {
