@@ -6,8 +6,8 @@
 use crate::cache::{CacheConfig, SearchCache};
 use crate::tools::{self, fetch, crawl_site};
 use crate::types::{
-    CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
-    crawl_args_schema, search_args_schema, visit_page_args_schema,
+    CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult,
+    VisitPageArgs, crawl_args_schema, search_args_schema, visit_page_args_schema,
 };
 use crate::{SERVER_NAME, VERSION};
 use serde::{Deserialize, Serialize};
@@ -244,48 +244,7 @@ impl DaedraHandler {
         // Perform search via multi-backend provider (aggregate across backends)
         let mut response = self.search_provider.search(&args).await?;
 
-        // Auto-enrich: fetch snippets from top 3 results that have short descriptions
-        let enrich_count = 3.min(response.data.len());
-        if enrich_count > 0 {
-            let fetch_client = self.fetch_client.clone();
-            let enrich_semaphore = Arc::new(Semaphore::new(2));
-            let futures: Vec<_> = response.data[..enrich_count].iter()
-                .filter(|r| r.description.len() < 100) // only enrich sparse results
-                .map(|r| {
-                    let url = r.url.clone();
-                    let client = fetch_client.clone();
-                    let semaphore = enrich_semaphore.clone();
-                    async move {
-                        let _permit = semaphore.acquire_owned().await.unwrap();
-                        let args = crate::types::VisitPageArgs {
-                            url: url.clone(),
-                            selector: None,
-                            include_images: false,
-                        };
-                        match tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            client.fetch(&args),
-                        ).await {
-                            Ok(Ok(page)) => {
-                                // Take first 300 chars as enriched description
-                                let snippet: String = page.content.chars().take(300).collect();
-                                Some((url, snippet))
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-                .collect();
-
-            let enrichments = futures::future::join_all(futures).await;
-            for enrichment in enrichments.into_iter().flatten() {
-                if let Some(result) = response.data.iter_mut().find(|r| r.url == enrichment.0) {
-                    if result.description.len() < 100 {
-                        result.description = enrichment.1;
-                    }
-                }
-            }
-        }
+        self.enrich_sparse_results(&mut response.data, 3).await;
 
         // Cache the results
         self.cache
@@ -298,6 +257,56 @@ impl DaedraHandler {
             .await;
 
         Ok(response)
+    }
+
+
+    /// Fetch page snippets for sparse top results (description < 100 chars).
+    async fn enrich_sparse_results(&self, results: &mut [SearchResult], count: usize) {
+        let enrich_count = count.min(results.len());
+        if enrich_count == 0 {
+            return;
+        }
+
+        let fetch_client = self.fetch_client.clone();
+        let enrich_semaphore = Arc::new(Semaphore::new(2));
+        let futures: Vec<_> = results[..enrich_count]
+            .iter()
+            .filter(|r| r.description.len() < 100)
+            .map(|r| {
+                let url = r.url.clone();
+                let client = fetch_client.clone();
+                let semaphore = enrich_semaphore.clone();
+                async move {
+                    let _permit = semaphore.acquire_owned().await.unwrap();
+                    let args = VisitPageArgs {
+                        url: url.clone(),
+                        selector: None,
+                        include_images: false,
+                    };
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        client.fetch(&args),
+                    )
+                    .await
+                    {
+                        Ok(Ok(page)) => {
+                            let snippet: String = page.content.chars().take(300).collect();
+                            Some((url, snippet))
+                        }
+                        _ => None,
+                    }
+                }
+            })
+            .collect();
+
+        let enrichments = futures::future::join_all(futures).await;
+        for enrichment in enrichments.into_iter().flatten() {
+            if let Some(result) = results.iter_mut().find(|r| r.url == enrichment.0) {
+                if result.description.len() < 100 {
+                    result.description = enrichment.1;
+                }
+            }
+        }
     }
 
     /// Execute fetch/visit page tool
@@ -328,34 +337,46 @@ impl DaedraHandler {
     pub async fn handle_request(&self, request: JsonRpcRequest) -> JsonRpcResponse {
         debug!(method = %request.method, "Handling request");
 
-        match request.method.as_str() {
-            "initialize" => {
-                let mut initialized = self.initialized.write().await;
-                *initialized = true;
-                JsonRpcResponse::success(request.id, self.get_server_info())
-            },
+        if request.method == "initialize" {
+            let mut initialized = self.initialized.write().await;
+            *initialized = true;
+        }
+
+        self.handle_method(&request.method, request.id, request.params)
+            .await
+    }
+
+    /// Dispatch a JSON-RPC method to its handler.
+    async fn handle_method(
+        &self,
+        method: &str,
+        id: Option<Value>,
+        params: Option<Value>,
+    ) -> JsonRpcResponse {
+        match method {
+            "initialize" => JsonRpcResponse::success(id, self.get_server_info()),
 
             "initialized" | "notifications/initialized" => {
                 // Notification acknowledgment - per MCP spec, notifications don't require responses
                 // but we return success for compatibility with clients that expect one
-                JsonRpcResponse::success(request.id, json!({}))
-            },
+                JsonRpcResponse::success(id, json!({}))
+            }
 
             "tools/list" => {
                 let tools = self.list_tools();
-                JsonRpcResponse::success(request.id, json!({ "tools": tools }))
-            },
+                JsonRpcResponse::success(id, json!({ "tools": tools }))
+            }
 
             "tools/call" => {
-                let params = match request.params {
+                let params = match params {
                     Some(p) => p,
                     None => {
                         return JsonRpcResponse::error(
-                            request.id,
+                            id,
                             -32602,
                             "Missing parameters".to_string(),
                         );
-                    },
+                    }
                 };
 
                 let tool_name = params
@@ -364,15 +385,15 @@ impl DaedraHandler {
                     .unwrap_or_default();
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
-                self.call_tool(request.id, tool_name, arguments).await
-            },
+                self.call_tool(id, tool_name, arguments).await
+            }
 
-            "ping" => JsonRpcResponse::success(request.id, json!({})),
+            "ping" => JsonRpcResponse::success(id, json!({})),
 
             _ => JsonRpcResponse::error(
-                request.id,
+                id,
                 -32601,
-                format!("Method not found: {}", request.method),
+                format!("Method not found: {}", method),
             ),
         }
     }
@@ -994,5 +1015,62 @@ mod tests {
         let result = handler.execute_search(args).await.unwrap();
         assert_eq!(result.data.len(), cached_response.data.len());
         assert_eq!(result.metadata.query, cached_response.metadata.query);
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_initialize() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method("initialize", Some(json!(1)), None)
+            .await;
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert_eq!(result["serverInfo"]["name"], SERVER_NAME);
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_ping() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler.handle_method("ping", Some(json!(1)), None).await;
+        assert!(response.result.is_some());
+        assert!(response.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_tools_list() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler.handle_method("tools/list", Some(json!(1)), None).await;
+        assert!(response.result.is_some());
+        let result = response.result.unwrap();
+        let tools = result["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_unknown() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler.handle_method("bogus", Some(json!(1)), None).await;
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_initialized() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler.handle_method("initialized", Some(json!(1)), None).await;
+        assert!(response.error.is_none());
+        assert!(response.result.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_notifications_initialized() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method("notifications/initialized", Some(json!(1)), None)
+            .await;
+        assert!(response.error.is_none());
+        assert!(response.result.is_some());
     }
 }
