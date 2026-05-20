@@ -10,8 +10,8 @@ use daedra::{
     server::{DaedraServer, ServerConfig, TransportType},
     tools::{crawl_site, fetch, search},
     types::{
-        CrawlArgs, CrawlResult, PageContent, SafeSearchLevel, SearchArgs, SearchOptions,
-        SearchResult, VisitPageArgs,
+        ContentType, CrawlArgs, CrawlResult, DaedraError, PageContent, PageLink, ResultMetadata,
+        SafeSearchLevel, SearchArgs, SearchOptions, SearchResult, VisitPageArgs,
     },
 };
 use std::time::Duration;
@@ -476,18 +476,23 @@ fn print_info(label: &str, value: &str) {
 }
 
 fn print_section(title: &str) {
-    println!("\n{}", title.yellow().bold());
-    println!("{}", "─".repeat(40).bright_black());
+    println!("{}", format_section(title));
 }
 
-async fn run_serve(
-    transport: TransportOption,
-    port: u16,
-    host: String,
-    no_cache: bool,
-    cache_ttl: u64,
-) -> DaedraResult<()> {
-    let cache_config = if no_cache {
+fn format_section(title: &str) -> String {
+    format!(
+        "\n{}\n{}",
+        title.yellow().bold(),
+        "─".repeat(40).bright_black()
+    )
+}
+
+fn format_info(label: &str, value: &str) -> String {
+    format!("  {} {}\n", format!("{}:", label).bright_blue(), value)
+}
+
+fn build_cache_config(no_cache: bool, cache_ttl: u64) -> CacheConfig {
+    if no_cache {
         CacheConfig {
             enabled: false,
             ..Default::default()
@@ -498,10 +503,28 @@ async fn run_serve(
             enabled: true,
             ..Default::default()
         }
-    };
+    }
+}
 
+fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
+    let parts: Vec<u8> = host.split('.').filter_map(|s| s.parse().ok()).collect();
+    if parts.len() != 4 {
+        return Err(DaedraError::InvalidArguments(
+            "Invalid host format".to_string(),
+        ));
+    }
+    Ok([parts[0], parts[1], parts[2], parts[3]])
+}
+
+async fn run_serve(
+    transport: TransportOption,
+    port: u16,
+    host: String,
+    no_cache: bool,
+    cache_ttl: u64,
+) -> DaedraResult<()> {
     let config = ServerConfig {
-        cache: cache_config,
+        cache: build_cache_config(no_cache, cache_ttl),
         verbose: false,
         ..Default::default()
     };
@@ -510,19 +533,9 @@ async fn run_serve(
 
     let transport_type = match transport {
         TransportOption::Stdio => TransportType::Stdio,
-        TransportOption::Sse => {
-            let host_parts: Vec<u8> = host.split('.').filter_map(|s| s.parse().ok()).collect();
-
-            if host_parts.len() != 4 {
-                return Err(daedra::types::DaedraError::InvalidArguments(
-                    "Invalid host format".to_string(),
-                ));
-            }
-
-            TransportType::Sse {
-                port,
-                host: [host_parts[0], host_parts[1], host_parts[2], host_parts[3]],
-            }
+        TransportOption::Sse => TransportType::Sse {
+            port,
+            host: parse_host_octets(&host)?,
         },
     };
 
@@ -530,92 +543,113 @@ async fn run_serve(
 }
 
 
-fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
+fn format_page_header(title: &str, no_color: bool) -> String {
     if no_color {
-        println!("\nSearch Results for: {}", query);
-        println!("{}", "=".repeat(50));
-        println!("Found {} results in region '{}'", count, region);
-        println!();
+        format!("\n{}\n{}", title, "=".repeat(50))
     } else {
-        print_section(&format!("Search Results for: {}", query.cyan()));
-        println!(
-            "Found {} results in region '{}'",
-            count.to_string().green(),
-            region.bright_blue()
-        );
-        println!();
+        format!(
+            "\n{}\n{}",
+            title.white().bold(),
+            "─".repeat(40).bright_black()
+        )
     }
 }
 
-fn print_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) {
+fn format_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) -> String {
     if no_color {
-        println!("{}. {}", index + 1, result.title);
-        println!("   URL: {}", result.url);
-        println!("   {}", result.description);
-        println!(
-            "   Source: {} | Type: {:?}",
-            result.metadata.source, result.metadata.content_type
-        );
-        println!();
+        format!(
+            "\nSearch Results for: {}\n{}\nFound {} results in region '{}'\n\n",
+            query,
+            "=".repeat(50),
+            count,
+            region
+        )
     } else {
-        println!(
-            "{} {}",
+        format!(
+            "{}\nFound {} results in region '{}'\n\n",
+            format_section(&format!("Search Results for: {}", query.cyan())),
+            count.to_string().green(),
+            region.bright_blue()
+        )
+    }
+}
+
+fn format_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) -> String {
+    if no_color {
+        format!(
+            "{}. {}\n   URL: {}\n   {}\n   Source: {} | Type: {:?}\n\n",
+            index + 1,
+            result.title,
+            result.url,
+            result.description,
+            result.metadata.source,
+            result.metadata.content_type
+        )
+    } else {
+        format!(
+            "{} {}\n   {} {}\n   {}\n   {} {} {} {:?}\n\n",
             format!("{}.", index + 1).bright_black(),
-            result.title.white().bold()
-        );
-        println!(
-            "   {} {}",
+            result.title.white().bold(),
             "URL:".bright_black(),
-            result.url.bright_blue().underline()
-        );
-        println!("   {}", result.description.bright_white());
-        println!(
-            "   {} {} {} {:?}",
+            result.url.bright_blue().underline(),
+            result.description.bright_white(),
             "Source:".bright_black(),
             result.metadata.source.yellow(),
             "|".bright_black(),
             result.metadata.content_type
-        );
-        println!();
+        )
     }
 }
 
-fn print_page_content_pretty(content: &PageContent, no_color: bool) {
+fn format_page_content_pretty(content: &PageContent, no_color: bool) -> String {
+    let mut out = format_page_header(&content.title, no_color);
     if no_color {
-        println!("\n{}", content.title);
-        println!("{}", "=".repeat(50));
-        println!("URL: {}", content.url);
-        println!("Fetched: {}", content.timestamp);
-        println!("Words: {}", content.word_count);
-        println!();
-        println!("{}", content.content);
-
+        out.push_str(&format!(
+            "URL: {}\nFetched: {}\nWords: {}\n\n{}\n",
+            content.url, content.timestamp, content.word_count, content.content
+        ));
         if let Some(links) = &content.links {
-            println!("\nLinks found ({}):", links.len());
+            out.push_str(&format!("\nLinks found ({}):\n", links.len()));
             for link in links.iter().take(10) {
-                println!("  - {} ({})", link.text, link.url);
+                out.push_str(&format!("  - {} ({})\n", link.text, link.url));
             }
         }
     } else {
-        print_section(&content.title.white().bold().to_string());
-        print_info("URL", &content.url.bright_blue().underline().to_string());
-        print_info("Fetched", &content.timestamp);
-        print_info("Words", &content.word_count.to_string().green().to_string());
-        println!();
-        println!("{}", content.content);
-
+        out.push_str(&format_info(
+            "URL",
+            &content.url.bright_blue().underline().to_string(),
+        ));
+        out.push_str(&format_info("Fetched", &content.timestamp));
+        out.push_str(&format_info(
+            "Words",
+            &content.word_count.to_string().green().to_string(),
+        ));
+        out.push_str(&format!("\n{}\n", content.content));
         if let Some(links) = &content.links {
-            print_section(&format!("Links found ({})", links.len()));
+            out.push_str(&format_section(&format!("Links found ({})", links.len())));
             for link in links.iter().take(10) {
-                println!(
-                    "  {} {} {}",
+                out.push_str(&format!(
+                    "  {} {} {}\n",
                     "→".bright_black(),
                     link.text.white(),
                     format!("({})", link.url).bright_blue()
-                );
+                ));
             }
         }
     }
+    out
+}
+
+fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
+    print!("{}", format_search_header_pretty(query, count, region, no_color));
+}
+
+fn print_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) {
+    print!("{}", format_search_result_pretty(result, index, no_color));
+}
+
+fn print_page_content_pretty(content: &PageContent, no_color: bool) {
+    print!("{}", format_page_content_pretty(content, no_color));
 }
 
 fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
@@ -904,6 +938,132 @@ Testing search functionality..."
         assert_eq!(safe_search_from_u8(1), Some(SafeSearchLevel::Moderate));
         assert_eq!(safe_search_from_u8(2), Some(SafeSearchLevel::Strict));
         assert_eq!(safe_search_from_u8(3), None);
+    }
+
+    #[test]
+    fn test_build_cache_config_disabled() {
+        let config = build_cache_config(true, 300);
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    fn test_build_cache_config_enabled() {
+        let config = build_cache_config(false, 120);
+        assert!(config.enabled);
+        assert_eq!(config.ttl, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_parse_host_octets_valid() {
+        assert_eq!(parse_host_octets("127.0.0.1").unwrap(), [127, 0, 0, 1]);
+    }
+
+    #[test]
+    fn test_parse_host_octets_invalid() {
+        assert!(parse_host_octets("127.0.1").is_err());
+        assert!(parse_host_octets("not-a-host").is_err());
+    }
+
+    fn sample_page_content() -> PageContent {
+        PageContent {
+            url: "https://example.com/page".to_string(),
+            title: "Example Page Title".to_string(),
+            content: "Page body text.".to_string(),
+            timestamp: "2024-01-01T00:00:00Z".to_string(),
+            word_count: 3,
+            links: Some(vec![PageLink {
+                text: "Other".to_string(),
+                url: "https://example.com/other".to_string(),
+            }]),
+        }
+    }
+
+    fn sample_search_result() -> SearchResult {
+        SearchResult {
+            title: "Example Result".to_string(),
+            url: "https://example.com".to_string(),
+            description: "A short description.".to_string(),
+            metadata: ResultMetadata {
+                content_type: ContentType::Article,
+                source: "example.com".to_string(),
+                favicon: None,
+                published_date: None,
+            },
+        }
+    }
+
+    #[test]
+    fn test_print_page_content_pretty_no_color() {
+        let content = sample_page_content();
+        let output = format_page_content_pretty(&content, true);
+        assert!(output.contains("Example Page Title"));
+        assert!(output.contains("URL: https://example.com/page"));
+        assert!(output.contains("Page body text."));
+        assert!(output.contains("Links found (1):"));
+    }
+
+    #[test]
+    fn test_print_page_content_pretty_with_color() {
+        let content = sample_page_content();
+        let output = format_page_content_pretty(&content, false);
+        assert!(output.contains("Example Page Title"));
+        assert!(output.contains("https://example.com/page"));
+    }
+
+    #[test]
+    fn test_print_search_header_pretty_no_color() {
+        let output = format_search_header_pretty("rust lang", 5, "wt-wt", true);
+        assert!(output.contains("Search Results for: rust lang"));
+        assert!(output.contains("Found 5 results in region 'wt-wt'"));
+    }
+
+    #[test]
+    fn test_print_search_result_pretty_no_color() {
+        let result = sample_search_result();
+        let output = format_search_result_pretty(&result, 0, true);
+        assert!(output.contains("Example Result"));
+        assert!(output.contains("URL: https://example.com"));
+        assert!(output.contains("A short description."));
+    }
+
+    #[test]
+    fn test_print_search_result_pretty_with_color() {
+        let result = sample_search_result();
+        let output = format_search_result_pretty(&result, 0, false);
+        assert!(output.contains("Example Result"));
+        assert!(output.contains("https://example.com"));
+    }
+
+    #[tokio::test]
+    async fn test_commands_info() {
+        let result = Commands::Info
+            .run(OutputFormat::Pretty, false, true, true)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_commands_search_default() {
+        let result = Commands::Search {
+            query: "rust programming".to_string(),
+            num_results: 1,
+            region: "wt-wt".to_string(),
+            safe_search: SafeSearchOption::default(),
+            time_range: None,
+        }
+        .run(OutputFormat::Pretty, false, true, true)
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_commands_check() {
+        let result = Commands::Check
+            .run(OutputFormat::Pretty, false, true, true)
+            .await;
+        assert!(result.is_ok());
     }
 }
 
