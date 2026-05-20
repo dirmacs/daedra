@@ -332,45 +332,43 @@ impl FetchClient {
 
     /// Check for bot protection indicators
     fn check_bot_protection(&self, document: &Html) -> DaedraResult<()> {
-        // Check for bot protection elements
-        for selector in BOT_PROTECTION_SELECTORS.iter() {
-            if document.select(selector).next().is_some() {
-                return Err(DaedraError::BotProtectionDetected);
-            }
+        if has_bot_protection_element(document) || has_suspicious_title(document) {
+            return Err(DaedraError::BotProtectionDetected);
         }
-
-        // Check for suspicious titles
-        if let Some(title_element) = document.select(&TITLE_SELECTOR).next() {
-            let title = title_element.text().collect::<String>().to_lowercase();
-            for suspicious in SUSPICIOUS_TITLES {
-                if title.contains(suspicious) {
-                    return Err(DaedraError::BotProtectionDetected);
-                }
-            }
-        }
-
         Ok(())
     }
 
     /// Extract page title
     fn extract_title(&self, document: &Html) -> String {
-        // Try <title> tag first
-        if let Some(title_element) = document.select(&TITLE_SELECTOR).next() {
-            let title = title_element.text().collect::<String>().trim().to_string();
-            if !title.is_empty() {
-                return clean_title(&title);
+        text_from_selector(document, &TITLE_SELECTOR)
+            .or_else(|| text_from_selector(document, &H1_SELECTOR))
+            .unwrap_or_else(|| "Untitled".to_string())
+    }
+
+    fn select_content_html(
+        &self,
+        html: &str,
+        document: &Html,
+        url: &str,
+        selector: Option<&str>,
+    ) -> DaedraResult<String> {
+        if let Some(sel) = selector {
+            Ok(self
+                .select_html_fragment(document, sel)?
+                .unwrap_or_else(|| self.select_body_html(document)))
+        } else if let Some(readability_html) = extract_with_readability(html, url) {
+            Ok(readability_html)
+        } else {
+            let fragment = self
+                .select_first_content_selector(document)
+                .unwrap_or_else(|| self.select_body_html(document));
+            let preview = clean_markdown(&html_to_markdown(&fragment));
+            if word_count(&preview) < 10 {
+                Ok(self.select_body_html(document))
+            } else {
+                Ok(fragment)
             }
         }
-
-        // Fall back to first h1
-        if let Some(h1_element) = document.select(&H1_SELECTOR).next() {
-            let title = h1_element.text().collect::<String>().trim().to_string();
-            if !title.is_empty() {
-                return clean_title(&title);
-            }
-        }
-
-        "Untitled".to_string()
     }
 
     /// Extract and convert content to Markdown
@@ -381,23 +379,7 @@ impl FetchClient {
         url: &str,
         selector: Option<&str>,
     ) -> DaedraResult<String> {
-        let content_html = if let Some(sel) = selector {
-            self.select_html_fragment(document, sel)?
-                .unwrap_or_else(|| self.select_body_html(document))
-        } else if let Some(readability_html) = extract_with_readability(html, url) {
-            readability_html
-        } else {
-            let fragment = self
-                .select_first_content_selector(document)
-                .unwrap_or_else(|| self.select_body_html(document));
-            let preview = clean_markdown(&html_to_markdown(&fragment));
-            if word_count(&preview) < 10 {
-                self.select_body_html(document)
-            } else {
-                fragment
-            }
-        };
-
+        let content_html = self.select_content_html(html, document, url, selector)?;
         let markdown = html_to_markdown(&content_html);
         let cleaned = clean_markdown(&markdown);
 
@@ -571,24 +553,46 @@ fn extract_pdf_content(bytes: &[u8]) -> DaedraResult<FetchedContent> {
     Ok(FetchedContent::Pdf(text))
 }
 
-fn classify_by_inference(kind: &infer::Type, bytes: &[u8]) -> Option<FetchedContent> {
-    let mime = kind.mime_type();
-    if mime == "application/pdf" {
-        return extract_pdf_content(bytes).ok();
-    }
-    if mime == "text/html" || mime == "application/xhtml+xml" {
-        return Some(FetchedContent::Html(bytes_to_utf8_string(bytes)));
-    }
-    if is_binary_mime(mime) {
-        return Some(FetchedContent::Binary {
-            mime: mime.to_string(),
+fn has_bot_protection_element(document: &Html) -> bool {
+    BOT_PROTECTION_SELECTORS
+        .iter()
+        .any(|s| document.select(s).next().is_some())
+}
+
+fn has_suspicious_title(document: &Html) -> bool {
+    document
+        .select(&TITLE_SELECTOR)
+        .next()
+        .map_or(false, |el| {
+            let title = el.text().collect::<String>().to_lowercase();
+            SUSPICIOUS_TITLES.iter().any(|s| title.contains(s))
+        })
+}
+
+fn text_from_selector(document: &Html, selector: &Selector) -> Option<String> {
+    document
+        .select(selector)
+        .next()
+        .map(|el| el.text().collect::<String>().trim().to_string())
+        .filter(|t| !t.is_empty())
+        .map(|t| clean_title(&t))
+}
+
+fn classify_inferred_mime(mime: &str, bytes: &[u8]) -> Option<FetchedContent> {
+    match mime {
+        "application/pdf" => extract_pdf_content(bytes).ok(),
+        "text/html" | "application/xhtml+xml" => Some(FetchedContent::Html(bytes_to_utf8_string(bytes))),
+        m if is_binary_mime(m) => Some(FetchedContent::Binary {
+            mime: m.to_string(),
             size: bytes.len(),
-        });
+        }),
+        m if m.starts_with("text/") => Some(FetchedContent::Html(bytes_to_utf8_string(bytes))),
+        _ => None,
     }
-    if mime.starts_with("text/") {
-        return Some(FetchedContent::Html(bytes_to_utf8_string(bytes)));
-    }
-    None
+}
+
+fn classify_by_inference(kind: &infer::Type, bytes: &[u8]) -> Option<FetchedContent> {
+    classify_inferred_mime(kind.mime_type(), bytes)
 }
 
 fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
@@ -765,6 +769,17 @@ impl FetchClient {
     pub fn check_bot_protection_for_tests(&self, html: &str) -> DaedraResult<()> {
         let document = Html::parse_document(html);
         self.check_bot_protection(&document)
+    }
+
+    /// Exposes content HTML selection for unit tests.
+    pub fn select_content_html_for_tests(
+        &self,
+        html: &str,
+        url: &str,
+        selector: Option<&str>,
+    ) -> DaedraResult<String> {
+        let document = Html::parse_document(html);
+        self.select_content_html(html, &document, url, selector)
     }
 }
 
@@ -1248,5 +1263,160 @@ mod tests {
             .unwrap();
         assert!(content.contains("Body fallback content"));
     }
+
+    #[test]
+    fn test_select_content_html_with_selector() {
+        let html = r#"<html><body>
+            <div class="noise">Ignored sidebar text here.</div>
+            <div id="target"><p>Selected fragment only.</p></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let content = client
+            .select_content_html_for_tests(html, "https://example.com", Some("#target"))
+            .unwrap();
+        assert!(content.contains("Selected fragment only"));
+        assert!(!content.contains("Ignored sidebar"));
+    }
+
+    #[test]
+    fn test_select_content_html_with_readability() {
+        let words: String = (0..60)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let html = format!(
+            "<html><head><title>Article</title></head><body><article><p>{words}</p></article></body></html>"
+        );
+        let client = FetchClient::default();
+        let content = client
+            .select_content_html_for_tests(&html, "https://example.com/article", None)
+            .unwrap();
+        assert!(content.contains("word0"));
+        assert!(content.contains("<p>"));
+    }
+
+    #[test]
+    fn test_select_content_html_fallback_short() {
+        let html = r#"<html><body><div class="x"></div></body></html>"#;
+        let client = FetchClient::default();
+        let content = client
+            .select_content_html_for_tests(html, "https://example.com", None)
+            .unwrap();
+        assert!(content.contains("body") || content.contains("<div"));
+    }
+
+    #[test]
+    fn test_select_content_html_fallback_long() {
+        let html = r#"<html><body>
+            <div class="wrapper"><p>Body fallback content without article or main tags but enough words here.</p></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let content = client
+            .select_content_html_for_tests(html, "https://example.com", None)
+            .unwrap();
+        assert!(content.contains("Body fallback content"));
+        assert!(content.contains("wrapper"));
+    }
+
+    #[test]
+    fn test_has_bot_protection_element_detected() {
+        let html = r#"<html><body><div id="cf-challenge-running"></div></body></html>"#;
+        let document = Html::parse_document(html);
+        assert!(has_bot_protection_element(&document));
+    }
+
+    #[test]
+    fn test_has_bot_protection_element_clean() {
+        let html = r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
+        let document = Html::parse_document(html);
+        assert!(!has_bot_protection_element(&document));
+    }
+
+    #[test]
+    fn test_has_suspicious_title_detected() {
+        let html = r#"<html><head><title>Just a moment...</title></head><body></body></html>"#;
+        let document = Html::parse_document(html);
+        assert!(has_suspicious_title(&document));
+    }
+
+    #[test]
+    fn test_has_suspicious_title_clean() {
+        let html = r#"<html><head><title>My Page</title></head><body></body></html>"#;
+        let document = Html::parse_document(html);
+        assert!(!has_suspicious_title(&document));
+    }
+
+    #[test]
+    fn test_has_suspicious_title_no_title() {
+        let html = r#"<html><body><p>No title element</p></body></html>"#;
+        let document = Html::parse_document(html);
+        assert!(!has_suspicious_title(&document));
+    }
+
+    #[test]
+    fn test_text_from_selector_title() {
+        let html = r#"<html><head><title>Test</title></head><body></body></html>"#;
+        let document = Html::parse_document(html);
+        assert_eq!(
+            text_from_selector(&document, &TITLE_SELECTOR),
+            Some("Test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_text_from_selector_empty() {
+        let html = r#"<html><head><title></title></head><body></body></html>"#;
+        let document = Html::parse_document(html);
+        assert_eq!(text_from_selector(&document, &TITLE_SELECTOR), None);
+    }
+
+    #[test]
+    fn test_text_from_selector_missing() {
+        let html = r#"<html><body><p>No title</p></body></html>"#;
+        let document = Html::parse_document(html);
+        assert_eq!(text_from_selector(&document, &TITLE_SELECTOR), None);
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_html() {
+        let bytes = b"<!DOCTYPE html><html><body></body></html>";
+        let result = classify_inferred_mime("text/html", bytes);
+        assert!(matches!(result, Some(FetchedContent::Html(_))));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_pdf() {
+        let bytes = include_bytes!("../../tests/fixtures/minimal.pdf");
+        let result = classify_inferred_mime("application/pdf", bytes);
+        assert!(matches!(result, Some(FetchedContent::Pdf(_))));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_text() {
+        let bytes = b"plain text content";
+        let result = classify_inferred_mime("text/plain", bytes);
+        assert!(matches!(result, Some(FetchedContent::Html(_))));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_binary() {
+        let bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let result = classify_inferred_mime("image/png", bytes);
+        assert!(matches!(
+            result,
+            Some(FetchedContent::Binary { mime, .. }) if mime == "image/png"
+        ));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_octet_stream() {
+        let bytes: &[u8] = &[0x00, 0x01, 0x02, 0x03];
+        let result = classify_inferred_mime("application/octet-stream", bytes);
+        assert!(matches!(
+            result,
+            Some(FetchedContent::Binary { mime, .. }) if mime == "application/octet-stream"
+        ));
+    }
+
 
 }
