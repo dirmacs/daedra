@@ -1029,9 +1029,10 @@ mod tests {
     #[tokio::test]
     async fn test_handle_method_unknown() {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
-        let response = handler.handle_method("bogus", Some(json!(1)), None).await;
-        assert!(response.error.is_some());
-        assert_eq!(response.error.unwrap().code, -32601);
+        let response = handler.handle_method("foo", Some(json!(1)), None).await;
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -32601);
+        assert!(err.message.contains("foo"));
     }
 
     #[tokio::test]
@@ -1039,7 +1040,7 @@ mod tests {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
         let response = handler.handle_method("initialized", Some(json!(1)), None).await;
         assert!(response.error.is_none());
-        assert!(response.result.is_some());
+        assert_eq!(response.result.unwrap(), json!({}));
     }
 
     #[tokio::test]
@@ -1049,7 +1050,51 @@ mod tests {
             .handle_method("notifications/initialized", Some(json!(1)), None)
             .await;
         assert!(response.error.is_none());
-        assert!(response.result.is_some());
+        assert_eq!(response.result.unwrap(), json!({}));
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_tools_call_missing_params() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method("tools/call", Some(json!(1)), None)
+            .await;
+        assert!(response.result.is_none());
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("Missing parameters"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_tools_call_unknown_tool() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method(
+                "tools/call",
+                Some(json!(1)),
+                Some(json!({"name": "unknown", "arguments": {}})),
+            )
+            .await;
+        assert!(response.result.is_none());
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -32601);
+        assert!(err.message.contains("unknown"));
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_method_tools_call_web_search_no_args() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method(
+                "tools/call",
+                Some(json!(1)),
+                Some(json!({"name": "web_search", "arguments": {}})),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert!(result.get("isError").is_some());
     }
 
     #[tokio::test]
@@ -1081,6 +1126,18 @@ mod tests {
         assert!(second.is_ok(), "second search should succeed: {:?}", second.err());
         assert!(!first.unwrap().data.is_empty());
         assert!(!second.unwrap().data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_visit_page_malformed_args() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_visit_page(Some(json!(1)), json!({"url": 12345}))
+            .await;
+        assert!(response.result.is_none());
+        let err = response.error.unwrap();
+        assert_eq!(err.code, -32602);
+        assert!(err.message.contains("Invalid fetch arguments"));
     }
 
     #[tokio::test]
@@ -1233,7 +1290,26 @@ mod tests {
             .await;
         assert!(response.error.is_none());
         let result = response.result.unwrap();
+        assert_eq!(result["isError"], false);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Example") || text.contains("example.com"));
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_visit_page_valid_url_fetch_fails() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_visit_page(
+                Some(json!(1)),
+                json!({"url": "https://127.0.0.1:1/"}),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
         assert_eq!(result["isError"], true);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Failed to fetch"));
     }
 
 }

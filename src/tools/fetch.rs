@@ -1012,11 +1012,27 @@ mod tests {
     }
 
     #[test]
-    fn test_is_skippable_href() {
+    fn test_is_skippable_href_hash() {
         assert!(is_skippable_href("#section"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_javascript() {
         assert!(is_skippable_href("javascript:void(0)"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_mailto() {
         assert!(is_skippable_href("mailto:a@b.com"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_tel() {
         assert!(is_skippable_href("tel:+123"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_full_url() {
         assert!(!is_skippable_href("https://example.com"));
     }
 
@@ -1378,28 +1394,42 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_inferred_mime_html() {
+    fn test_classify_inferred_mime_text_html() {
         let bytes = b"<!DOCTYPE html><html><body></body></html>";
         let result = classify_inferred_mime("text/html", bytes);
         assert!(matches!(result, Some(FetchedContent::Html(_))));
     }
 
     #[test]
-    fn test_classify_inferred_mime_pdf() {
+    fn test_classify_inferred_mime_application_pdf() {
         let bytes = include_bytes!("../../tests/fixtures/minimal.pdf");
         let result = classify_inferred_mime("application/pdf", bytes);
         assert!(matches!(result, Some(FetchedContent::Pdf(_))));
     }
 
     #[test]
-    fn test_classify_inferred_mime_text() {
+    fn test_classify_inferred_mime_text_plain() {
         let bytes = b"plain text content";
         let result = classify_inferred_mime("text/plain", bytes);
         assert!(matches!(result, Some(FetchedContent::Html(_))));
     }
 
     #[test]
-    fn test_classify_inferred_mime_binary() {
+    fn test_classify_inferred_mime_text_csv() {
+        let bytes = b"name,value\na,1";
+        let result = classify_inferred_mime("text/csv", bytes);
+        assert!(matches!(result, Some(FetchedContent::Html(_))));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_text_xml() {
+        let bytes = b"<?xml version=\"1.0\"?><root/>";
+        let result = classify_inferred_mime("text/xml", bytes);
+        assert!(matches!(result, Some(FetchedContent::Html(_))));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_image_png() {
         let bytes: &[u8] = &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let result = classify_inferred_mime("image/png", bytes);
         assert!(matches!(
@@ -1409,12 +1439,32 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_inferred_mime_octet_stream() {
+    fn test_classify_inferred_mime_application_zip() {
+        let bytes: &[u8] = &[0x50, 0x4B, 0x03, 0x04];
+        let result = classify_inferred_mime("application/zip", bytes);
+        assert!(matches!(
+            result,
+            Some(FetchedContent::Binary { mime, .. }) if mime == "application/zip"
+        ));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_application_octet_stream() {
         let bytes: &[u8] = &[0x00, 0x01, 0x02, 0x03];
         let result = classify_inferred_mime("application/octet-stream", bytes);
         assert!(matches!(
             result,
             Some(FetchedContent::Binary { mime, .. }) if mime == "application/octet-stream"
+        ));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_audio_mpeg() {
+        let bytes: &[u8] = &[0xFF, 0xFB, 0x90, 0x00];
+        let result = classify_inferred_mime("audio/mpeg", bytes);
+        assert!(matches!(
+            result,
+            Some(FetchedContent::Binary { mime, .. }) if mime == "audio/mpeg"
         ));
     }
 
