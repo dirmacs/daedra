@@ -32,7 +32,7 @@ use tracing::{info, warn};
 use url::Url;
 
 /// Default User-Agent string for sitemap/robots fetches.
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; daedra-crawl/0.2.0; +https://github.com/dirmacs/daedra)";
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; daedra-crawl/0.3.0; +https://github.com/dirmacs/daedra)";
 
 /// Hard cap on sitemap response size (10 MB) to bound worst-case parser work.
 const SITEMAP_MAX_BYTES: usize = 10 * 1024 * 1024;

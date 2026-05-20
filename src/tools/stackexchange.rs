@@ -100,6 +100,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[ignore = "network: live StackExchange API call"]
     async fn test_stackoverflow_search_live() {
         let backend = StackExchangeBackend::new();
         let args = SearchArgs {
