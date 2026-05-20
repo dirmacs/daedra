@@ -153,6 +153,33 @@ pub fn parse_sitemap(body: &str) -> Vec<Url> {
     out
 }
 
+/// Extract same-origin anchor links from a parsed HTML document.
+pub(crate) fn extract_same_origin_links(doc: &Html, root: &Url, cap: usize) -> Vec<Url> {
+    let mut seen: Vec<Url> = Vec::new();
+    for a in doc.select(&ANCHOR_SELECTOR) {
+        if let Some(href) = a.value().attr("href") {
+            let href = href.trim();
+            if href.is_empty() || href.starts_with('#') || href.starts_with("javascript:") {
+                continue;
+            }
+            let absolute = match root.join(href) {
+                Ok(u) => u,
+                Err(_) => continue,
+            };
+            if absolute.origin() != root.origin() {
+                continue;
+            }
+            if seen.iter().all(|u| u != &absolute) {
+                seen.push(absolute);
+                if seen.len() >= cap {
+                    break;
+                }
+            }
+        }
+    }
+    seen
+}
+
 /// Fall back to HTML anchor discovery when no sitemap is available.
 /// Fetches `root`, extracts same-origin anchor hrefs, and returns up to
 /// `cap` absolute URLs. This is deliberately minimal — for real crawling
@@ -170,25 +197,7 @@ async fn discover_via_anchors(client: &Client, root: &Url, cap: usize) -> Daedra
         .map_err(|e| DaedraError::FetchError(format!("anchor discovery body {} failed: {}", root, e)))?;
 
     let doc = Html::parse_document(&body);
-    let mut seen: Vec<Url> = Vec::new();
-    for a in doc.select(&ANCHOR_SELECTOR) {
-        if let Some(href) = a.value().attr("href") {
-            let absolute = match root.join(href) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-            if absolute.origin() != root.origin() {
-                continue;
-            }
-            if seen.iter().all(|u| u != &absolute) {
-                seen.push(absolute);
-                if seen.len() >= cap {
-                    break;
-                }
-            }
-        }
-    }
-    Ok(seen)
+    Ok(extract_same_origin_links(&doc, root, cap))
 }
 
 fn clamp_crawl_args(max_pages: usize, concurrency: usize) -> (usize, usize) {
@@ -445,6 +454,66 @@ mod tests {
         assert_eq!(urls.len(), 2);
         assert_eq!(urls[0].as_str(), "https://example.com/first");
         assert_eq!(urls[1].as_str(), "https://example.com/second");
+    }
+
+
+    fn html_doc(body: &str) -> Html {
+        Html::parse_document(body)
+    }
+
+    #[test]
+    fn test_extract_same_origin_links_basic() {
+        let root = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(
+            r#"<a href="/a">A</a><a href="/b">B</a><a href="https://example.com/c">C</a>"#,
+        );
+        let urls = extract_same_origin_links(&doc, &root, 10);
+        assert_eq!(urls.len(), 3);
+        assert_eq!(urls[0].path(), "/a");
+        assert_eq!(urls[1].path(), "/b");
+        assert_eq!(urls[2].path(), "/c");
+    }
+
+    #[test]
+    fn test_extract_same_origin_links_cross_origin_filtered() {
+        let root = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(
+            r#"<a href="/local">L</a><a href="https://example.com/other">O</a><a href="https://evil.com/x">X</a>"#,
+        );
+        let urls = extract_same_origin_links(&doc, &root, 10);
+        assert_eq!(urls.len(), 2);
+        assert!(urls.iter().all(|u| u.host_str() == Some("example.com")));
+    }
+
+    #[test]
+    fn test_extract_same_origin_links_cap() {
+        let root = Url::parse("https://example.com/").unwrap();
+        let links: String = (0..10)
+            .map(|i| format!(r#"<a href="/p{}">P</a>"#, i))
+            .collect();
+        let doc = html_doc(&links);
+        let urls = extract_same_origin_links(&doc, &root, 3);
+        assert_eq!(urls.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_same_origin_links_duplicates() {
+        let root = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(r#"<a href="/dup">1</a><a href="/dup">2</a>"#);
+        let urls = extract_same_origin_links(&doc, &root, 10);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].path(), "/dup");
+    }
+
+    #[test]
+    fn test_extract_same_origin_links_skips_invalid_hrefs() {
+        let root = Url::parse("https://example.com/").unwrap();
+        let doc = html_doc(
+            r##"<a href="/ok">OK</a><a href="#">frag</a><a href="javascript:void(0)">js</a>"##,
+        );
+        let urls = extract_same_origin_links(&doc, &root, 10);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].path(), "/ok");
     }
 
 }
