@@ -52,6 +52,27 @@ lazy_static! {
     static ref ANCHOR_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
 }
 
+fn is_sitemap_size_ok(body: &str) -> bool {
+    body.len() <= SITEMAP_MAX_BYTES
+}
+
+async fn read_sitemap_body(resp: reqwest::Response, url: &Url) -> Option<String> {
+    match resp.text().await {
+        Ok(b) if is_sitemap_size_ok(&b) => Some(b),
+        Ok(_) => {
+            warn!(
+                "sitemap {} exceeded {} bytes, skipping",
+                url, SITEMAP_MAX_BYTES
+            );
+            None
+        }
+        Err(e) => {
+            warn!("sitemap {} body read failed: {}", url, e);
+            None
+        }
+    }
+}
+
 async fn fetch_sitemap_body(client: &Client, url: &Url) -> Option<String> {
     let resp = match client
         .get(url.clone())
@@ -70,20 +91,7 @@ async fn fetch_sitemap_body(client: &Client, url: &Url) -> Option<String> {
         return None;
     }
 
-    match resp.text().await {
-        Ok(b) if b.len() <= SITEMAP_MAX_BYTES => Some(b),
-        Ok(_) => {
-            warn!(
-                "sitemap {} exceeded {} bytes, skipping",
-                url, SITEMAP_MAX_BYTES
-            );
-            None
-        }
-        Err(e) => {
-            warn!("sitemap {} body read failed: {}", url, e);
-            None
-        }
-    }
+    read_sitemap_body(resp, url).await
 }
 
 async fn probe_sitemap_candidate(client: &Client, root: &Url, path: &str) -> Option<Vec<Url>> {
@@ -153,21 +161,29 @@ pub fn parse_sitemap(body: &str) -> Vec<Url> {
     out
 }
 
-/// Resolve a relative `href` against `base`, returning `None` for invalid or skippable hrefs.
-fn resolve_absolute_url(base: &Url, href: &str) -> Option<Url> {
-    let href = href.trim();
-    if href.is_empty()
+fn is_skippable_href(href: &str) -> bool {
+    href.is_empty()
         || href.starts_with('#')
         || href.starts_with("javascript:")
         || href.starts_with("mailto:")
         || (href.starts_with(':') && !href.starts_with("//"))
-    {
+}
+
+fn is_http_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.host().is_some()
+}
+
+/// Resolve a relative `href` against `base`, returning `None` for invalid or skippable hrefs.
+fn resolve_absolute_url(base: &Url, href: &str) -> Option<Url> {
+    let href = href.trim();
+    if is_skippable_href(href) {
         return None;
     }
     let absolute = base.join(href).ok()?;
-    match absolute.scheme() {
-        "http" | "https" if absolute.host().is_some() => Some(absolute),
-        _ => None,
+    if is_http_url(&absolute) {
+        Some(absolute)
+    } else {
+        None
     }
 }
 
@@ -420,6 +436,84 @@ mod tests {
         assert!(parse_sitemap("").is_empty());
         assert!(parse_sitemap("<?xml version=\"1.0\"?><urlset></urlset>").is_empty());
     }
+    #[test]
+    fn test_is_skippable_href_empty() {
+        assert!(is_skippable_href(""));
+    }
+
+    #[test]
+    fn test_is_skippable_href_hash() {
+        assert!(is_skippable_href("#section"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_javascript() {
+        assert!(is_skippable_href("javascript:void(0)"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_mailto() {
+        assert!(is_skippable_href("mailto:test@test.com"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_lone_colon() {
+        assert!(is_skippable_href(":invalid"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_protocol_relative() {
+        assert!(!is_skippable_href("//cdn.example.com/img"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_valid_path() {
+        assert!(!is_skippable_href("/about"));
+    }
+
+    #[test]
+    fn test_is_skippable_href_https_url() {
+        assert!(!is_skippable_href("https://example.com"));
+    }
+
+    #[test]
+    fn test_is_http_url_http() {
+        assert!(is_http_url(&Url::parse("http://example.com").unwrap()));
+    }
+
+    #[test]
+    fn test_is_http_url_https() {
+        assert!(is_http_url(&Url::parse("https://example.com").unwrap()));
+    }
+
+    #[test]
+    fn test_is_http_url_ftp() {
+        assert!(!is_http_url(&Url::parse("ftp://example.com").unwrap()));
+    }
+
+    #[test]
+    fn test_is_http_url_no_host() {
+        match Url::parse("http://") {
+            Ok(url) => assert!(!is_http_url(&url)),
+            Err(_) => {} // EmptyHost — unparseable, nothing to classify
+        }
+    }
+
+    #[test]
+    fn test_is_sitemap_size_ok_small() {
+        assert!(is_sitemap_size_ok(&"x".repeat(100)));
+    }
+
+    #[test]
+    fn test_is_sitemap_size_ok_exactly_limit() {
+        assert!(is_sitemap_size_ok(&"x".repeat(SITEMAP_MAX_BYTES)));
+    }
+
+    #[test]
+    fn test_is_sitemap_size_ok_over_limit() {
+        assert!(!is_sitemap_size_ok(&"x".repeat(SITEMAP_MAX_BYTES + 1)));
+    }
+
     #[test]
     fn test_clamp_crawl_args_min() {
         assert_eq!(clamp_crawl_args(0, 0), (1, 1));
