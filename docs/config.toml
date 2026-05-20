@@ -9,3 +9,4 @@ highlight_code = true
 highlight_theme = "base16-ocean-dark"
 
 [extra]
+version = "0.3.0"

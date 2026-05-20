@@ -5,7 +5,7 @@
 <h1 align="center">Daedra</h1>
 
 <p align="center">
-  Self-contained web search MCP server. Rust. 7 backends. Works from any IP.<br>
+  Self-contained web search MCP server. Rust. 9 backends. Works from any IP.<br>
   Single binary. Automatic backend fallback. Zero configuration for basic search.
 </p>
 
@@ -15,17 +15,29 @@
 [![CI](https://github.com/dirmacs/daedra/actions/workflows/ci.yml/badge.svg)](https://github.com/dirmacs/daedra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Daedra** is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. Multiple search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
+**Daedra** (v0.3.0) is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. Multiple search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
 
 ## Why Daedra?
 
 Every major search engine (Google, Bing, DuckDuckGo, Brave) blocks datacenter/VPS IPs with CAPTCHAs since 2025. Daedra solves this with a **multi-backend fallback chain** that automatically finds a backend that works:
 
 ```
-Serper (API) → Tavily (API) → Bing → Wikipedia → StackOverflow → GitHub → DuckDuckGo
+Serper (API) → Tavily (API) → Bing → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
 ```
 
-Pure Rust. If one backend is blocked or rate-limited, the next one takes over automatically.
+Pure Rust. If one backend is blocked or rate-limited, the next one takes over automatically. Per-backend **circuit breakers** and **governor** rate limits keep the chain stable under load; transient failures get a **classified retry** (exponential backoff, not a blind fixed delay).
+
+## Features
+
+- **9 search backends** with automatic fallback (see table below)
+- **Circuit breaker** (`BackendHealth`) — opens after repeated failures, 30s cooldown
+- **Per-backend keyed rate limiting** via `governor` (API vs knowledge vs scraper tiers)
+- **Classified retry** — only transient errors are retried; bot protection and rate limits fail fast
+- **Readability extraction** — `dom_smoothie` article body extraction for HTML pages
+- **PDF support** — `infer` MIME sniffing + `pdf-extract` text extraction
+- **Content classification** — `FetchedContent` enum (`Html` / `Pdf` / `Binary`) on fetch
+- **URL classification** — `src/url_classification.rs` maps search result URLs to content types
+- **MCP tools** — `web_search`, `visit_page`, `crawl_site` (+ `search_duckduckgo` alias)
 
 ## Install
 
@@ -43,6 +55,8 @@ cargo install daedra
 | **Wikipedia** | OpenSearch API | None | **Always** |
 | **StackExchange** | Public API | None | **Always** |
 | **GitHub** | Public API | None / `GITHUB_TOKEN` | **Always** |
+| **Wiby** | Indie web search | None | **Always** |
+| **DDG Instant** | Knowledge graph API | None | **Always** |
 | DuckDuckGo | HTML scraping | None | Rarely (blocked since mid-2025) |
 
 Backends are tried in order. First one that returns results wins.
@@ -68,7 +82,7 @@ Backends are tried in order. First one that returns results wins.
 # Search
 daedra search "rust async runtime" --num-results 5
 
-# Fetch a webpage as Markdown
+# Fetch a webpage as Markdown (HTML via Readability, PDF via pdf-extract)
 daedra fetch https://rust-lang.org
 
 # Check backend health
@@ -121,7 +135,7 @@ Aliases: `search_duckduckgo` (backward compat)
 
 ### `visit_page`
 
-Fetch and extract web page content as Markdown.
+Fetch and extract page content as Markdown. HTML pages use **dom_smoothie** Readability extraction; PDFs are detected via **infer** and text is extracted with **pdf-extract**.
 
 ```json
 {
@@ -131,25 +145,38 @@ Fetch and extract web page content as Markdown.
 }
 ```
 
+### `crawl_site`
+
+Crawl a site from a root URL (sitemap or link following), returning Markdown per page.
+
 ## Architecture
 
 ```
 Daedra
-├── SearchProvider (fallback chain)
-│   ├── SerperBackend      (Google via API)
-│   ├── TavilyBackend      (AI-optimized API)
-│   ├── BingBackend         (HTML scraping)
-│   ├── WikipediaBackend    (OpenSearch API)
-│   ├── StackExchangeBackend (Public API)
-│   ├── GitHubBackend       (Public API)
-│   └── SearchClient        (DuckDuckGo HTML)
-├── FetchClient (HTML → Markdown)
+├── SearchProvider (fallback chain, circuit breakers, keyed rate limits)
+│   ├── SerperBackend / TavilyBackend (API, optional keys)
+│   ├── BingBackend (HTML scraping)
+│   ├── WikipediaBackend / StackExchangeBackend / GitHubBackend
+│   ├── WibyBackend / DdgInstantBackend
+│   └── SearchClient (DuckDuckGo HTML, last resort)
+├── FetchClient (FetchedContent: Html / Pdf / Binary → Markdown)
+│   ├── dom_smoothie (Readability), infer (MIME), pdf-extract (PDF)
+├── url_classification (search result URL → ContentType)
 ├── SearchCache (moka async cache)
-├── MCP Server
+├── MCP Server (DaedraHandler: handle_web_search, handle_visit_page, handle_crawl_site)
 │   ├── STDIO transport (JSON-RPC)
 │   └── SSE transport (Axum HTTP)
-└── CLI (clap)
+└── CLI (Commands::run, CheckReporter)
 ```
+
+## Key dependencies
+
+| Crate | Role |
+|-------|------|
+| `dom_smoothie` 0.17 | Readability article extraction |
+| `infer` 0.19 | MIME sniffing on fetched bytes |
+| `pdf-extract` 0.10 | PDF text extraction |
+| `governor` 0.10 | Per-backend keyed rate limiting |
 
 ## Configuration
 
