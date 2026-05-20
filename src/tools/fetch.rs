@@ -188,80 +188,78 @@ impl FetchClient {
     pub async fn fetch(&self, args: &VisitPageArgs) -> DaedraResult<PageContent> {
         info!(url = %args.url, "Fetching page");
 
-        // Validate URL
-        let parsed_url = Url::parse(&args.url).map_err(DaedraError::UrlParseError)?;
-
-        if !matches!(parsed_url.scheme(), "http" | "https") {
-            return Err(DaedraError::InvalidArguments(
-                "Only HTTP(S) URLs are supported".to_string(),
-            ));
-        }
-
+        let parsed_url = validate_url(&args.url)?;
         let fetched = self.fetch_with_retry(&args.url).await?;
-        let timestamp = chrono::Utc::now().to_rfc3339();
 
         match fetched {
             FetchedContent::Html(html) => {
-                let document = Html::parse_document(&html);
-
-                self.check_bot_protection(&document)?;
-
-                let title = self.extract_title(&document);
-                let content = self.extract_content(
-                    &html,
-                    &document,
-                    &args.url,
-                    args.selector.as_deref(),
-                )?;
-
-                let word_count = word_count(&content);
-
-                let links = if word_count >= 50 {
-                    Some(self.extract_links(&document, &parsed_url))
-                } else {
-                    None
-                };
-
-                info!(
-                    url = %args.url,
-                    title = %title,
-                    word_count = word_count,
-                    "Page fetched successfully"
-                );
-
-                Ok(PageContent {
-                    url: args.url.clone(),
-                    title,
-                    content,
-                    timestamp,
-                    word_count,
-                    links,
-                })
+                self.build_page_from_html(&html, &args.url, &parsed_url, args.selector.as_deref())
             }
-            FetchedContent::Pdf(text) => {
-                let content = text.trim().to_string();
-                let word_count = word_count(&content);
-                let title = title_from_url(&args.url);
-
-                info!(
-                    url = %args.url,
-                    title = %title,
-                    word_count = word_count,
-                    "PDF fetched successfully"
-                );
-
-                Ok(PageContent {
-                    url: args.url.clone(),
-                    title,
-                    content,
-                    timestamp,
-                    word_count,
-                    links: None,
-                })
-            }
+            FetchedContent::Pdf(text) => Ok(FetchClient::build_page_from_pdf(&text, &args.url)),
             FetchedContent::Binary { mime, size } => Err(DaedraError::ExtractionError(format!(
                 "Unsupported content type: {mime} ({size} bytes)"
             ))),
+        }
+    }
+
+    fn build_page_from_html(
+        &self,
+        html: &str,
+        url: &str,
+        base_url: &Url,
+        selector: Option<&str>,
+    ) -> DaedraResult<PageContent> {
+        let document = Html::parse_document(html);
+
+        self.check_bot_protection(&document)?;
+
+        let title = self.extract_title(&document);
+        let content = self.extract_content(html, &document, url, selector)?;
+
+        let word_count = word_count(&content);
+
+        let links = if word_count >= 50 {
+            Some(self.extract_links(&document, base_url))
+        } else {
+            None
+        };
+
+        info!(
+            url = %url,
+            title = %title,
+            word_count = word_count,
+            "Page fetched successfully"
+        );
+
+        Ok(PageContent {
+            url: url.to_string(),
+            title,
+            content,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            word_count,
+            links,
+        })
+    }
+
+    fn build_page_from_pdf(text: &str, url: &str) -> PageContent {
+        let content = text.trim().to_string();
+        let word_count = word_count(&content);
+        let title = title_from_url(url);
+
+        info!(
+            url = %url,
+            title = %title,
+            word_count = word_count,
+            "PDF fetched successfully"
+        );
+
+        PageContent {
+            url: url.to_string(),
+            title,
+            content,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            word_count,
+            links: None,
         }
     }
 
@@ -281,26 +279,7 @@ impl FetchClient {
                 backoff::Error::transient(DaedraError::HttpError(e))
             })?;
 
-            let status = response.status();
-
-            if !status.is_success() {
-                warn!(status = %status, url = %url, "Fetch returned non-success status");
-
-                if status.as_u16() == 429 {
-                    return Err(backoff::Error::transient(DaedraError::RateLimitExceeded));
-                }
-
-                if status.as_u16() == 403 {
-                    return Err(backoff::Error::permanent(
-                        DaedraError::BotProtectionDetected,
-                    ));
-                }
-
-                return Err(backoff::Error::permanent(DaedraError::FetchError(format!(
-                    "HTTP {}",
-                    status
-                ))));
-            }
+            classify_response_status(response.status(), &url)?;
 
             if let Some(content_length) = response.content_length()
                 && content_length as usize > MAX_CONTENT_SIZE
@@ -497,6 +476,46 @@ fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
+fn validate_url(url: &str) -> DaedraResult<Url> {
+    let parsed_url = Url::parse(url).map_err(DaedraError::UrlParseError)?;
+
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return Err(DaedraError::InvalidArguments(
+            "Only HTTP(S) URLs are supported".to_string(),
+        ));
+    }
+
+    Ok(parsed_url)
+}
+
+fn is_retryable_status(status: u16) -> bool {
+    status == 429
+}
+
+fn classify_response_status(
+    status: reqwest::StatusCode,
+    url: &str,
+) -> Result<(), backoff::Error<DaedraError>> {
+    if status.is_success() {
+        return Ok(());
+    }
+
+    warn!(status = %status, url = %url, "Fetch returned non-success status");
+
+    if is_retryable_status(status.as_u16()) {
+        return Err(backoff::Error::transient(DaedraError::RateLimitExceeded));
+    }
+
+    if status.as_u16() == 403 {
+        return Err(backoff::Error::permanent(DaedraError::BotProtectionDetected));
+    }
+
+    Err(backoff::Error::permanent(DaedraError::FetchError(format!(
+        "HTTP {}",
+        status
+    ))))
+}
+
 fn normalize_content_type(content_type: &str) -> String {
     content_type
         .split(';')
@@ -506,17 +525,27 @@ fn normalize_content_type(content_type: &str) -> String {
         .to_lowercase()
 }
 
+const BINARY_CONTENT_PREFIXES: &[&str] = &[
+    "image/",
+    "video/",
+    "audio/",
+    "application/vnd.openxmlformats-",
+];
+
+const BINARY_CONTENT_EXACT: &[&str] = &[
+    "application/zip",
+    "application/gzip",
+    "application/x-tar",
+    "application/octet-stream",
+    "application/vnd.ms-excel",
+];
+
 fn is_known_binary_content_type(content_type: &str) -> bool {
     let ct = normalize_content_type(content_type);
-    ct.starts_with("image/")
-        || ct.starts_with("video/")
-        || ct.starts_with("audio/")
-        || ct == "application/zip"
-        || ct == "application/gzip"
-        || ct == "application/x-tar"
-        || ct == "application/octet-stream"
-        || ct == "application/vnd.ms-excel"
-        || ct.starts_with("application/vnd.openxmlformats-")
+    BINARY_CONTENT_PREFIXES
+        .iter()
+        .any(|prefix| ct.starts_with(prefix))
+        || BINARY_CONTENT_EXACT.iter().any(|exact| ct == *exact)
 }
 
 fn is_binary_mime(mime: &str) -> bool {
@@ -542,26 +571,27 @@ fn extract_pdf_content(bytes: &[u8]) -> DaedraResult<FetchedContent> {
     Ok(FetchedContent::Pdf(text))
 }
 
-fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
-    if let Some(kind) = infer::get(bytes) {
-        let mime = kind.mime_type();
-        if mime == "application/pdf" {
-            return extract_pdf_content(bytes);
-        }
-        if mime == "text/html" || mime == "application/xhtml+xml" {
-            return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
-        }
-        if is_binary_mime(mime) {
-            return Ok(FetchedContent::Binary {
-                mime: mime.to_string(),
-                size: bytes.len(),
-            });
-        }
-        if mime.starts_with("text/") {
-            return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
-        }
+fn classify_by_inference(kind: &infer::Type, bytes: &[u8]) -> Option<FetchedContent> {
+    let mime = kind.mime_type();
+    if mime == "application/pdf" {
+        return extract_pdf_content(bytes).ok();
     }
+    if mime == "text/html" || mime == "application/xhtml+xml" {
+        return Some(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+    if is_binary_mime(mime) {
+        return Some(FetchedContent::Binary {
+            mime: mime.to_string(),
+            size: bytes.len(),
+        });
+    }
+    if mime.starts_with("text/") {
+        return Some(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+    None
+}
 
+fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
     let ct = normalize_content_type(content_type);
     if ct.contains("text/html") {
         return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
@@ -579,6 +609,19 @@ fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> DaedraResult<Fe
         },
         size: bytes.len(),
     })
+}
+
+fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
+    if let Some(kind) = infer::get(bytes) {
+        if let Some(content) = classify_by_inference(&kind, bytes) {
+            return Ok(content);
+        }
+        if kind.mime_type() == "application/pdf" {
+            return extract_pdf_content(bytes);
+        }
+    }
+
+    classify_by_fallback(content_type, bytes)
 }
 
 fn extract_with_readability(html: &str, url: &str) -> Option<String> {
@@ -950,5 +993,87 @@ mod tests {
         );
         assert!(extract_with_readability(&html, "https://example.com/article").is_some());
         assert!(extract_with_readability("<html><body>Hi</body></html>", "https://example.com").is_none());
+    }
+
+    #[test]
+    fn test_classify_by_inference_pdf() {
+        let bytes = include_bytes!("../../tests/fixtures/minimal.pdf");
+        let kind = infer::get(bytes).expect("pdf magic");
+        let result = classify_by_inference(&kind, bytes);
+        assert!(matches!(result, Some(FetchedContent::Pdf(_))));
+    }
+
+    #[test]
+    fn test_classify_by_inference_html() {
+        let bytes = b"<html><body><p>Hello</p></body></html>";
+        let kind = infer::get(bytes).expect("html infer match");
+        let result = classify_by_inference(&kind, bytes);
+        assert!(matches!(result, Some(FetchedContent::Html(_))));
+    }
+
+    #[test]
+    fn test_classify_by_inference_binary() {
+        let bytes: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+        let kind = infer::get(bytes).expect("jpeg magic");
+        let result = classify_by_inference(&kind, bytes);
+        assert!(matches!(result, Some(FetchedContent::Binary { .. })));
+    }
+
+    #[test]
+    fn test_classify_by_fallback_html_content_type() {
+        let bytes = b"not inferable content";
+        let result = classify_by_fallback("text/html", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Html(_)));
+    }
+
+    #[test]
+    fn test_classify_by_fallback_utf8_text() {
+        let bytes = b"plain text without magic bytes";
+        let result = classify_by_fallback("", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Html(_)));
+    }
+
+    #[test]
+    fn test_classify_by_fallback_binary() {
+        let bytes: &[u8] = &[0x80, 0x81, 0x82, 0x83];
+        let result = classify_by_fallback("", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Binary { .. }));
+    }
+
+    #[test]
+    fn test_build_page_from_pdf() {
+        let page = FetchClient::build_page_from_pdf("  hello world  ", "https://example.com/doc.pdf");
+        assert_eq!(page.url, "https://example.com/doc.pdf");
+        assert_eq!(page.title, "doc.pdf");
+        assert_eq!(page.content, "hello world");
+        assert_eq!(page.word_count, 2);
+        assert!(page.links.is_none());
+    }
+
+    #[test]
+    fn test_validate_url_valid() {
+        let url = validate_url("https://example.com").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/");
+    }
+
+    #[test]
+    fn test_validate_url_invalid_scheme() {
+        let err = validate_url("ftp://example.com").unwrap_err();
+        assert!(matches!(err, DaedraError::InvalidArguments(_)));
+    }
+
+    #[test]
+    fn test_validate_url_malformed() {
+        assert!(validate_url("not a url").is_err());
+    }
+
+    #[test]
+    fn test_is_known_binary_content_type_refactored() {
+        assert!(is_known_binary_content_type("image/png"));
+        assert!(is_known_binary_content_type("video/mp4"));
+        assert!(is_known_binary_content_type("audio/mp3"));
+        assert!(is_known_binary_content_type("application/zip"));
+        assert!(!is_known_binary_content_type("text/html"));
+        assert!(!is_known_binary_content_type("application/json"));
     }
 }
