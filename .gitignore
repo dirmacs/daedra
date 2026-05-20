@@ -60,3 +60,4 @@ logs/
 # Package files
 *.tar.gz
 *.zip
+.cursor/
