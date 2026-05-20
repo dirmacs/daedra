@@ -15,7 +15,7 @@ use futures::future::join_all;
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::Client;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, instrument, warn};
@@ -169,46 +169,9 @@ impl SearchClient {
             if results.len() >= max_results {
                 break;
             }
-
-            // Extract title and URL
-            let title_element = match element.select(&TITLE_SELECTOR).next() {
-                Some(el) => el,
-                None => continue,
-            };
-
-            let title = clean_text(&title_element.text().collect::<String>());
-            let url = match title_element.value().attr("href") {
-                Some(href) => extract_actual_url(href),
-                None => continue,
-            };
-
-            // Skip invalid URLs
-            if url.is_empty() || !url.starts_with("http") {
-                continue;
+            if let Some(result) = extract_result_from_element(&element) {
+                results.push(result);
             }
-
-            // Extract snippet
-            let description = element
-                .select(&SNIPPET_SELECTOR)
-                .next()
-                .map(|el| clean_text(&el.text().collect::<String>()))
-                .unwrap_or_default();
-
-            // Detect content type and extract source
-            let content_type = detect_content_type(&url);
-            let source = extract_domain(&url);
-
-            results.push(SearchResult {
-                title,
-                url,
-                description,
-                metadata: ResultMetadata {
-                    content_type,
-                    source,
-                    favicon: None,
-                    published_date: None,
-                },
-            });
         }
 
         if results.is_empty() {
@@ -217,6 +180,40 @@ impl SearchClient {
 
         Ok(results)
     }
+}
+
+/// Extract a single search result from a DDG result div element.
+pub(crate) fn extract_result_from_element(element: &ElementRef) -> Option<SearchResult> {
+    let title_element = element.select(&TITLE_SELECTOR).next()?;
+
+    let title = clean_text(&title_element.text().collect::<String>());
+    let href = title_element.value().attr("href")?;
+    let url = extract_actual_url(href);
+
+    if url.is_empty() || !url.starts_with("http") {
+        return None;
+    }
+
+    let description = element
+        .select(&SNIPPET_SELECTOR)
+        .next()
+        .map(|el| clean_text(&el.text().collect::<String>()))
+        .unwrap_or_default();
+
+    let content_type = detect_content_type(&url);
+    let source = extract_domain(&url);
+
+    Some(SearchResult {
+        title,
+        url,
+        description,
+        metadata: ResultMetadata {
+            content_type,
+            source,
+            favicon: None,
+            published_date: None,
+        },
+    })
 }
 
 impl Default for SearchClient {
@@ -474,6 +471,39 @@ mod tests {
     fn test_extract_actual_url_no_uddg() {
         let direct = "https://example.com/page";
         assert_eq!(extract_actual_url(direct), direct);
+    }
+
+    fn extract_from_result_html(html: &str) -> Option<SearchResult> {
+        let fragment = Html::parse_fragment(html);
+        let element = fragment.select(&RESULT_SELECTOR).next()?;
+        extract_result_from_element(&element)
+    }
+
+    #[test]
+    fn test_extract_result_from_element_valid() {
+        let html = r#"<div class="result"><a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=abc" class="result__a">Example Title</a><a class="result__snippet">Example snippet</a></div>"#;
+        let result = extract_from_result_html(html).unwrap();
+        assert_eq!(result.title, "Example Title");
+        assert_eq!(result.url, "https://example.com");
+        assert_eq!(result.description, "Example snippet");
+    }
+
+    #[test]
+    fn test_extract_result_from_element_no_title() {
+        let html = r#"<div class="result"><a class="result__snippet">Snippet only</a></div>"#;
+        assert!(extract_from_result_html(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_result_from_element_no_href() {
+        let html = r#"<div class="result"><a class="result__a">Title without href</a></div>"#;
+        assert!(extract_from_result_html(html).is_none());
+    }
+
+    #[test]
+    fn test_extract_result_from_element_invalid_url() {
+        let html = r#"<div class="result"><a href="/not-http" class="result__a">Bad URL</a></div>"#;
+        assert!(extract_from_result_html(html).is_none());
     }
 
     #[test]
