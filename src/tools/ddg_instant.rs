@@ -61,12 +61,25 @@ fn abstract_to_result(data: &DdgResponse) -> Option<SearchResult> {
     })
 }
 
-fn topic_to_result(topic: &serde_json::Value) -> Option<SearchResult> {
-    let text = topic.get("Text")?.as_str()?;
+fn extract_topic_url(topic: &serde_json::Value) -> Option<&str> {
     let url = topic.get("FirstURL")?.as_str()?;
-    if url.starts_with("https://duckduckgo.com/c/") {
+    if url.is_empty() || url.starts_with("https://duckduckgo.com/c/") {
         return None;
     }
+    Some(url)
+}
+
+fn extract_topic_text(topic: &serde_json::Value) -> Option<&str> {
+    let text = topic.get("Text")?.as_str()?;
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
+}
+
+fn topic_to_result(topic: &serde_json::Value) -> Option<SearchResult> {
+    let text = extract_topic_text(topic)?;
+    let url = extract_topic_url(topic)?;
     Some(SearchResult {
         title: text.chars().take(80).collect(),
         url: url.to_string(),
