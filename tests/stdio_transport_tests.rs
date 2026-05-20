@@ -811,11 +811,11 @@ mod concurrent_request_tests {
         let mut process = DaedraProcess::spawn().await;
         process.initialize().await;
 
-        // Test various ID types
+        // Test various ID types. `id: null` is omitted: serde deserializes it as
+        // Some(Value::Null), which JSON-RPC treats as a notification (no response).
         let test_cases = vec![
             json!({"jsonrpc": "2.0", "id": 42, "method": "ping", "params": {}}),
             json!({"jsonrpc": "2.0", "id": "string-id", "method": "ping", "params": {}}),
-            json!({"jsonrpc": "2.0", "id": null, "method": "ping", "params": {}}),
         ];
 
         for request in test_cases {

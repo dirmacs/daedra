@@ -191,6 +191,14 @@ impl DaedraHandler {
                 input_schema: search_args_schema(),
             },
             McpTool {
+                name: "search_duckduckgo".to_string(),
+                description: Some(
+                    "Alias for web_search (backward compatibility). Search the web using 9 backends (Wikipedia, StackOverflow, GitHub, Wiby, Bing, Serper, Tavily, DDG Instant, DDG). Returns aggregated results from multiple sources."
+                        .to_string(),
+                ),
+                input_schema: search_args_schema(),
+            },
+            McpTool {
                 name: "visit_page".to_string(),
                 description: Some(
                     "Visit a webpage and extract its content as Markdown. Useful for reading articles, documentation, or any web page."
@@ -572,8 +580,9 @@ impl DaedraServer {
                 },
             };
 
-            // Notifications (no id) don't get responses per JSON-RPC 2.0 spec
-            let is_notification = request.id.is_none();
+            // Notifications (missing id or id: null) don't get responses per JSON-RPC 2.0 spec
+            let is_notification = request.id.is_none()
+                || matches!(&request.id, Some(Value::Null));
 
             // Handle the request
             let response = self.handler.handle_request(request).await;
@@ -705,8 +714,9 @@ mod tests {
         let handler = DaedraHandler::new(config).unwrap();
         let tools = handler.list_tools();
 
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
         assert!(tools.iter().any(|t| t.name == "web_search"));
+        assert!(tools.iter().any(|t| t.name == "search_duckduckgo"));
         assert!(tools.iter().any(|t| t.name == "visit_page"));
         assert!(tools.iter().any(|t| t.name == "crawl_site"));
     }
@@ -783,7 +793,7 @@ mod tests {
 
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
     }
 
     #[tokio::test]
