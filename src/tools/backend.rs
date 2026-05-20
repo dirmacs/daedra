@@ -261,6 +261,85 @@ impl SearchProvider {
         )
     }
 
+
+    fn record_health_outcome(health: &Option<Arc<BackendHealth>>, success: bool) {
+        if let Some(h) = health {
+            if success {
+                h.record_success();
+            } else {
+                h.record_failure();
+            }
+        }
+    }
+
+    fn handle_successful_result(
+        name: String,
+        result: DaedraResult<SearchResponse>,
+        health: Option<Arc<BackendHealth>>,
+    ) -> (String, DaedraResult<SearchResponse>) {
+        if let Ok(r) = &result {
+            if !r.data.is_empty() {
+                Self::record_health_outcome(&health, true);
+            }
+        }
+        (name, result)
+    }
+
+    fn handle_non_retryable(
+        name: String,
+        result: DaedraResult<SearchResponse>,
+        health: Option<Arc<BackendHealth>>,
+    ) -> (String, DaedraResult<SearchResponse>) {
+        Self::record_health_outcome(&health, false);
+        (name, result)
+    }
+
+    async fn handle_transient_error(
+        b: &dyn SearchBackend,
+        args: &SearchArgs,
+        name: String,
+        result: DaedraResult<SearchResponse>,
+        health: Option<Arc<BackendHealth>>,
+        _limiters: &Arc<BackendRateLimiters>,
+        _scraper_default: &DefaultKeyedRateLimiter<String>,
+    ) -> (String, DaedraResult<SearchResponse>) {
+        if let Err(e) = &result {
+            Self::record_health_outcome(&health, false);
+            warn!(backend = %name, error = %e, "Backend transient error, retrying once");
+        }
+        let mut backoff = ExponentialBackoff {
+            initial_interval: Duration::from_millis(400),
+            max_interval: Duration::from_secs(2),
+            max_elapsed_time: Some(Duration::from_secs(3)),
+            ..Default::default()
+        };
+        if let Some(delay) = backoff.next_backoff() {
+            tokio::time::sleep(delay).await;
+        }
+        let retry_result = b.search(args).await;
+        match &retry_result {
+            Ok(r) if !r.data.is_empty() => Self::record_health_outcome(&health, true),
+            Err(retry_err) if Self::is_non_retryable(retry_err) => {
+                Self::record_health_outcome(&health, false);
+            }
+            Err(_) => Self::record_health_outcome(&health, false),
+            _ => {}
+        }
+        (name, retry_result)
+    }
+
+    fn handle_unrecoverable_error(
+        name: String,
+        result: DaedraResult<SearchResponse>,
+        health: Option<Arc<BackendHealth>>,
+    ) -> (String, DaedraResult<SearchResponse>) {
+        if let Err(e) = &result {
+            Self::record_health_outcome(&health, false);
+            warn!(backend = %name, error = %e, "Backend error (no retry)");
+        }
+        (name, result)
+    }
+
     async fn query_backend(
         b: &dyn SearchBackend,
         args: &SearchArgs,
@@ -272,7 +351,7 @@ impl SearchProvider {
 
         limiters.until_ready(&name, scraper_default).await;
 
-        if let Some(ref h) = health {
+        if let Some(h) = &health {
             if !h.is_available() {
                 info!(backend = %name, "Circuit open, skipping");
                 return (
@@ -289,81 +368,31 @@ impl SearchProvider {
         let result = b.search(args).await;
 
         match &result {
-            Ok(r) if !r.data.is_empty() => {
-                if let Some(ref h) = health {
-                    h.record_success();
-                }
-                (name, result)
-            }
-            Ok(_) => {
-                // Empty but not an error — don't retry or penalize the circuit.
-                (name, result)
-            }
-            Err(e) if Self::is_non_retryable(e) => {
-                if let Some(ref h) = health {
-                    h.record_failure();
-                }
-                (name, result)
-            }
+            Ok(_) => Self::handle_successful_result(name, result, health),
+            Err(e) if Self::is_non_retryable(e) => Self::handle_non_retryable(name, result, health),
             Err(e) if Self::is_transient(e) => {
-                if let Some(ref h) = health {
-                    h.record_failure();
-                }
-                warn!(backend = %name, error = %e, "Backend transient error, retrying once");
-                let mut backoff = ExponentialBackoff {
-                    initial_interval: Duration::from_millis(400),
-                    max_interval: Duration::from_secs(2),
-                    max_elapsed_time: Some(Duration::from_secs(3)),
-                    ..Default::default()
-                };
-                if let Some(delay) = backoff.next_backoff() {
-                    tokio::time::sleep(delay).await;
-                }
-                let retry_result = b.search(args).await;
-                match &retry_result {
-                    Ok(r) if !r.data.is_empty() => {
-                        if let Some(ref h) = health {
-                            h.record_success();
-                        }
-                    }
-                    Err(retry_err) if Self::is_non_retryable(retry_err) => {
-                        if let Some(ref h) = health {
-                            h.record_failure();
-                        }
-                    }
-                    Err(_) => {
-                        if let Some(ref h) = health {
-                            h.record_failure();
-                        }
-                    }
-                    _ => {}
-                }
-                (name, retry_result)
+                Self::handle_transient_error(
+                    b,
+                    args,
+                    name,
+                    result,
+                    health,
+                    limiters,
+                    scraper_default,
+                )
+                .await
             }
-            Err(e) => {
-                if let Some(ref h) = health {
-                    h.record_failure();
-                }
-                warn!(backend = %name, error = %e, "Backend error (no retry)");
-                (name, result)
-            }
+            Err(_) => Self::handle_unrecoverable_error(name, result, health),
         }
     }
-
     /// Aggregate search across ALL available backends.
     ///
     /// Queries all backends concurrently, merges results, deduplicates by URL,
     /// and interleaves sources for diversity (Wikipedia, StackOverflow, GitHub
     /// results mixed rather than grouped).
-    pub async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
-        let opts = args.options.clone().unwrap_or_default();
-        let target_count = opts.num_results;
 
-        // Throttle aggregate searches — wait instead of failing when over limit.
-        self.rate_limiter.until_ready().await;
-
-        let queryable: Vec<_> = self
-            .backends
+    fn collect_queryable_backends(&self) -> Vec<&Box<dyn SearchBackend>> {
+        self.backends
             .iter()
             .filter(|b| b.is_available())
             .filter(|b| {
@@ -372,24 +401,17 @@ impl SearchProvider {
                     .map(|h| h.is_available())
                     .unwrap_or(true)
             })
-            .collect();
+            .collect()
+    }
 
-        if queryable.is_empty() {
-            let open: Vec<String> = self
-                .circuit_breakers
-                .iter()
-                .filter(|(_, h)| !h.is_available())
-                .map(|(name, _)| name.clone())
-                .collect();
-            return Err(DaedraError::SearchError(format!(
-                "All search backends have open circuits (cooldown in progress). Open: [{}]",
-                open.join(", ")
-            )));
-        }
-
+    async fn execute_concurrent_queries(
+        &self,
+        backends: &[&Box<dyn SearchBackend>],
+        args: &SearchArgs,
+    ) -> Vec<(String, DaedraResult<SearchResponse>)> {
         let limiters = Arc::clone(&self.backend_rate_limits);
         let scraper_default = &self.backend_limiters;
-        let futures: Vec<_> = queryable
+        let futures: Vec<_> = backends
             .iter()
             .map(|b| {
                 let a = args.clone();
@@ -400,11 +422,17 @@ impl SearchProvider {
                 }
             })
             .collect();
+        futures::future::join_all(futures).await
+    }
 
-        let results = futures::future::join_all(futures).await;
+    fn categorize_results(
+        results: Vec<(String, DaedraResult<SearchResponse>)>,
+    ) -> (
+        Vec<(String, Vec<crate::types::SearchResult>)>,
+        bool,
+        Vec<String>,
+    ) {
         let tried: Vec<String> = results.iter().map(|(name, _)| name.clone()).collect();
-
-        // Collect all successful results grouped by backend
         let mut by_source: Vec<(String, Vec<crate::types::SearchResult>)> = Vec::new();
         let mut any_success = false;
 
@@ -434,28 +462,13 @@ impl SearchProvider {
             }
         }
 
-        if !any_success {
-            let open_circuits: Vec<String> = self
-                .circuit_breakers
-                .iter()
-                .filter(|(name, h)| tried.contains(name) && !h.is_available())
-                .map(|(name, _)| name.clone())
-                .collect();
-            let circuit_note = if open_circuits.is_empty() {
-                String::new()
-            } else {
-                format!("; open circuits: [{}]", open_circuits.join(", "))
-            };
-            return Err(DaedraError::SearchError(format!(
-                "All {} search backends returned 0 results (tried: {}){}",
-                tried.len(),
-                tried.join(", "),
-                circuit_note
-            )));
-        }
+        (by_source, any_success, tried)
+    }
 
-        // Interleave results from different sources for diversity
-        // Round-robin: take 1 from each source, repeat until we have enough
+    fn merge_interleave_results(
+        by_source: &[(String, Vec<crate::types::SearchResult>)],
+        target_count: usize,
+    ) -> Vec<crate::types::SearchResult> {
         let mut merged: Vec<crate::types::SearchResult> = Vec::new();
         let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut indices: Vec<usize> = vec![0; by_source.len()];
@@ -481,6 +494,53 @@ impl SearchProvider {
             }
         }
 
+        merged
+    }
+
+    pub async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+        let opts = args.options.clone().unwrap_or_default();
+        let target_count = opts.num_results;
+
+        self.rate_limiter.until_ready().await;
+
+        let queryable = self.collect_queryable_backends();
+        if queryable.is_empty() {
+            let open: Vec<String> = self
+                .circuit_breakers
+                .iter()
+                .filter(|(_, h)| !h.is_available())
+                .map(|(name, _)| name.clone())
+                .collect();
+            return Err(DaedraError::SearchError(format!(
+                "All search backends have open circuits (cooldown in progress). Open: [{}]",
+                open.join(", ")
+            )));
+        }
+
+        let results = self.execute_concurrent_queries(&queryable, args).await;
+        let (by_source, any_success, tried) = Self::categorize_results(results);
+
+        if !any_success {
+            let open_circuits: Vec<String> = self
+                .circuit_breakers
+                .iter()
+                .filter(|(name, h)| tried.contains(name) && !h.is_available())
+                .map(|(name, _)| name.clone())
+                .collect();
+            let circuit_note = if open_circuits.is_empty() {
+                String::new()
+            } else {
+                format!("; open circuits: [{}]", open_circuits.join(", "))
+            };
+            return Err(DaedraError::SearchError(format!(
+                "All {} search backends returned 0 results (tried: {}){}",
+                tried.len(),
+                tried.join(", "),
+                circuit_note
+            )));
+        }
+
+        let merged = Self::merge_interleave_results(&by_source, target_count);
         let sources: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
         info!(
             total = merged.len(),
@@ -491,7 +551,6 @@ impl SearchProvider {
 
         Ok(SearchResponse::new(args.query.clone(), merged, &opts))
     }
-
     /// List available backend names.
     pub fn available_backends(&self) -> Vec<&str> {
         self.backends
@@ -543,6 +602,79 @@ mod tests {
         assert!(!health.is_available());
         health.record_success();
         assert!(health.is_available());
+    }
+
+
+    #[test]
+    fn test_circuit_breaker_half_open() {
+        let health = BackendHealth::new(3, Duration::from_millis(50));
+        for _ in 0..3 {
+            health.record_failure();
+        }
+        assert!(!health.is_available());
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(
+            health.is_available(),
+            "after cooldown, circuit should be half-open (probe allowed)"
+        );
+    }
+
+    #[test]
+    fn test_circuit_breaker_stays_open_on_failure() {
+        let health = BackendHealth::new(3, Duration::from_millis(50));
+        for _ in 0..3 {
+            health.record_failure();
+        }
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(health.is_available(), "half-open probe window");
+        health.record_failure();
+        assert!(
+            !health.is_available(),
+            "failed probe should keep circuit open"
+        );
+    }
+
+    #[test]
+    fn test_is_non_retryable() {
+        assert!(SearchProvider::is_non_retryable(
+            &DaedraError::BotProtectionDetected
+        ));
+        assert!(SearchProvider::is_non_retryable(
+            &DaedraError::RateLimitExceeded
+        ));
+        assert!(SearchProvider::is_non_retryable(&DaedraError::SearchError(
+            "HTTP 403 forbidden".to_string()
+        )));
+        assert!(SearchProvider::is_non_retryable(&DaedraError::SearchError(
+            "CAPTCHA required".to_string()
+        )));
+        assert!(!SearchProvider::is_non_retryable(&DaedraError::Timeout));
+    }
+
+    #[tokio::test]
+    async fn test_is_transient() {
+        let client = reqwest::Client::new();
+        let http_err = DaedraError::HttpError(
+            client
+                .get("http://127.0.0.1:1")
+                .send()
+                .await
+                .unwrap_err(),
+        );
+        assert!(SearchProvider::is_transient(&http_err));
+        assert!(SearchProvider::is_transient(&DaedraError::Timeout));
+        assert!(!SearchProvider::is_transient(&DaedraError::SearchError(
+            "not transient".to_string()
+        )));
+        assert!(!SearchProvider::is_transient(
+            &DaedraError::BotProtectionDetected
+        ));
+    }
+
+    #[test]
+    fn test_backend_rate_limiters_default() {
+        let limiter = BackendRateLimiters::default_limiter();
+        assert!(limiter.check_key(&"bing".to_string()).is_ok());
     }
 
     #[tokio::test]
