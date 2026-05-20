@@ -469,4 +469,41 @@ mod tests {
         assert!(params.iter().any(|(k, v)| *k == "kl" && v == "us-en"));
         assert!(params.iter().any(|(k, v)| *k == "df" && v == "w"));
     }
+
+    #[test]
+    fn test_extract_actual_url_no_uddg() {
+        let direct = "https://example.com/page";
+        assert_eq!(extract_actual_url(direct), direct);
+    }
+
+    #[test]
+    fn test_parse_search_results_empty_html() {
+        let client = SearchClient::new().unwrap();
+        let results = client.parse_search_results("<html><body></body></html>", 10).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_parse_search_results_with_results() {
+        let html = r#"<div class="result"><a href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&rut=abc" class="result__a">Example Title</a><a class="result__snippet">Example snippet</a></div>"#;
+        let client = SearchClient::new().unwrap();
+        let results = client.parse_search_results(html, 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Example Title");
+        assert_eq!(results[0].url, "https://example.com");
+        assert_eq!(results[0].description, "Example snippet");
+    }
+
+    #[test]
+    fn test_parse_search_results_respects_max() {
+        let mut html = String::new();
+        for i in 0..5 {
+            html.push_str(&format!(
+                r#"<div class="result"><a href="https://example{i}.com" class="result__a">Title {i}</a><a class="result__snippet">Snippet {i}</a></div>"#
+            ));
+        }
+        let client = SearchClient::new().unwrap();
+        let results = client.parse_search_results(&html, 2).unwrap();
+        assert_eq!(results.len(), 2);
+    }
 }

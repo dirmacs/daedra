@@ -782,4 +782,173 @@ mod tests {
         assert!(markdown.contains("Paragraph"));
         assert!(markdown.contains("bold"));
     }
+
+    #[test]
+    fn test_classify_fetched_content_html() {
+        let bytes = b"<html><body><p>Hello</p></body></html>";
+        let result = classify_fetched_content("text/html", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Html(_)));
+    }
+
+    #[test]
+    fn test_classify_fetched_content_pdf() {
+        let bytes = include_bytes!("../../tests/fixtures/minimal.pdf");
+        let result = classify_fetched_content("application/pdf", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Pdf(_)));
+    }
+
+    #[test]
+    fn test_classify_fetched_content_binary() {
+        let bytes: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];
+        let result = classify_fetched_content("image/jpeg", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Binary { .. }));
+    }
+
+    #[test]
+    fn test_classify_fetched_content_fallback_utf8() {
+        let bytes = b"plain text without magic bytes";
+        let result = classify_fetched_content("", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Html(_)));
+    }
+
+    #[test]
+    fn test_classify_fetched_content_fallback_binary() {
+        let bytes: &[u8] = &[0x80, 0x81, 0x82, 0x83];
+        let result = classify_fetched_content("", bytes).unwrap();
+        assert!(matches!(result, FetchedContent::Binary { .. }));
+    }
+
+    #[test]
+    fn test_normalize_content_type() {
+        assert_eq!(
+            normalize_content_type("text/html; charset=utf-8"),
+            "text/html"
+        );
+    }
+
+    #[test]
+    fn test_is_known_binary_content_type() {
+        assert!(is_known_binary_content_type("image/png"));
+        assert!(!is_known_binary_content_type("text/html"));
+        assert!(is_known_binary_content_type("application/zip"));
+    }
+
+    #[test]
+    fn test_check_body_size_ok() {
+        assert!(check_body_size(100).is_ok());
+    }
+
+    #[test]
+    fn test_check_body_size_too_large() {
+        assert!(check_body_size(MAX_CONTENT_SIZE + 1).is_err());
+    }
+
+    #[test]
+    fn test_extract_links() {
+        let html = r#"<html><body>
+            <a href="https://example.com/one">First Link</a>
+            <a href="/two">Second Link</a>
+            <a href="https://example.com/three">Third Link</a>
+        </body></html>"#;
+        let document = Html::parse_document(html);
+        let base = Url::parse("https://example.com/page").unwrap();
+        let client = FetchClient::default();
+        let links = client.extract_links(&document, &base);
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].text, "First Link");
+        assert_eq!(links[0].url, "https://example.com/one");
+        assert_eq!(links[1].text, "Second Link");
+        assert_eq!(links[1].url, "https://example.com/two");
+        assert_eq!(links[2].text, "Third Link");
+        assert_eq!(links[2].url, "https://example.com/three");
+    }
+
+    #[test]
+    fn test_extract_links_skips_javascript() {
+        let html = r#"<html><body>
+            <a href="javascript:void(0)">JS</a>
+            <a href="mailto:test@example.com">Mail</a>
+            <a href="https://example.com/ok">OK Link</a>
+        </body></html>"#;
+        let document = Html::parse_document(html);
+        let base = Url::parse("https://example.com").unwrap();
+        let client = FetchClient::default();
+        let links = client.extract_links(&document, &base);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://example.com/ok");
+    }
+
+    #[test]
+    fn test_extract_links_deduplicates() {
+        let html = r#"<html><body>
+            <a href="https://example.com/same">First</a>
+            <a href="https://example.com/same">Second</a>
+        </body></html>"#;
+        let document = Html::parse_document(html);
+        let base = Url::parse("https://example.com").unwrap();
+        let client = FetchClient::default();
+        let links = client.extract_links(&document, &base);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://example.com/same");
+    }
+
+    #[test]
+    fn test_clean_markdown_removes_excessive_blanks() {
+        let input = "# Title\n\n\n\nParagraph\n\n\n\n\nAnother paragraph";
+        let expected = "# Title\n\nParagraph\n\nAnother paragraph";
+        assert_eq!(clean_markdown(input), expected);
+    }
+
+    #[test]
+    fn test_word_count() {
+        assert_eq!(word_count("one two three"), 3);
+        assert_eq!(word_count("  spaced   words  "), 2);
+        assert_eq!(word_count(""), 0);
+    }
+
+    #[test]
+    fn test_title_from_url() {
+        assert_eq!(
+            title_from_url("https://example.com/docs/guide.pdf"),
+            "guide.pdf"
+        );
+        assert_eq!(title_from_url("https://example.com/"), "https://example.com/");
+    }
+
+    #[test]
+    fn test_is_skippable_href() {
+        assert!(is_skippable_href("#section"));
+        assert!(is_skippable_href("javascript:void(0)"));
+        assert!(is_skippable_href("mailto:a@b.com"));
+        assert!(is_skippable_href("tel:+123"));
+        assert!(!is_skippable_href("https://example.com"));
+    }
+
+    #[test]
+    fn test_resolve_href() {
+        let base = Url::parse("https://example.com/page").unwrap();
+        assert_eq!(
+            resolve_href(&base, "/other").map(|u| u.to_string()),
+            Some("https://example.com/other".to_string())
+        );
+        assert_eq!(
+            resolve_href(&base, "relative").map(|u| u.to_string()),
+            Some("https://example.com/relative".to_string())
+        );
+        assert_eq!(resolve_href(&base, "#top"), None);
+        assert_eq!(resolve_href(&base, "javascript:alert(1)"), None);
+    }
+
+    #[test]
+    fn test_extract_with_readability() {
+        let words: String = (0..60)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let html = format!(
+            "<html><head><title>Article</title></head><body><article><p>{words}</p></article></body></html>"
+        );
+        assert!(extract_with_readability(&html, "https://example.com/article").is_some());
+        assert!(extract_with_readability("<html><body>Hi</body></html>", "https://example.com").is_none());
+    }
 }

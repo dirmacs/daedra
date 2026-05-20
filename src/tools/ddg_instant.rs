@@ -109,3 +109,34 @@ impl SearchBackend for DdgInstantBackend {
 
     fn name(&self) -> &str { "ddg-instant" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ddg_instant_name() {
+        assert_eq!(DdgInstantBackend::new().name(), "ddg-instant");
+    }
+
+    #[test]
+    fn test_ddg_response_deserialization() {
+        let json = r#"{
+            "AbstractText": "Rust is a systems programming language.",
+            "AbstractURL": "https://example.com/rust",
+            "Heading": "Rust (programming language)",
+            "RelatedTopics": [
+                {"Text": "Related topic", "FirstURL": "https://example.com/related"}
+            ]
+        }"#;
+        let data: DdgResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(data.abstract_text, "Rust is a systems programming language.");
+        assert_eq!(data.abstract_url, "https://example.com/rust");
+        assert_eq!(data.heading, "Rust (programming language)");
+        assert_eq!(data.related_topics.len(), 1);
+        assert_eq!(
+            data.related_topics[0].get("Text").and_then(|v| v.as_str()),
+            Some("Related topic")
+        );
+    }
+}
