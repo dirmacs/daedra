@@ -4,7 +4,7 @@
 //! tool requests and manages communication via STDIO or SSE transports.
 
 use crate::cache::{CacheConfig, SearchCache};
-use crate::tools::{self, fetch, search, crawl_site};
+use crate::tools::{self, fetch, crawl_site};
 use crate::types::{
     CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, VisitPageArgs,
     crawl_args_schema, search_args_schema, visit_page_args_schema,
@@ -70,6 +70,11 @@ pub struct JsonRpcRequest {
     /// Method parameters
     #[serde(default)]
     pub params: Option<Value>,
+}
+
+/// Returns true when the request is a JSON-RPC notification (no response expected).
+pub fn is_notification(request: &JsonRpcRequest) -> bool {
+    request.id.is_none() || matches!(&request.id, Some(Value::Null))
 }
 
 /// JSON-RPC 2.0 Response
@@ -515,6 +520,46 @@ impl DaedraHandler {
     }
 }
 
+/// Parse and handle one STDIO line; returns a response only for non-notification requests.
+async fn process_stdio_line(line: &str, handler: &DaedraHandler) -> Option<JsonRpcResponse> {
+    if line.trim().is_empty() {
+        return None;
+    }
+
+    debug!(request = %line, "Received request");
+
+    let request: JsonRpcRequest = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => {
+            return Some(JsonRpcResponse::error(
+                None,
+                -32700,
+                format!("Parse error: {}", e),
+            ));
+        }
+    };
+
+    let response = handler.handle_request(request.clone()).await;
+    if is_notification(&request) {
+        None
+    } else {
+        Some(response)
+    }
+}
+
+/// Serialize a JSON-RPC response and write it to STDIO (with trailing newline).
+async fn write_stdio_response(
+    response: JsonRpcResponse,
+    stdout: &mut tokio::io::BufWriter<tokio::io::Stdout>,
+) -> std::io::Result<()> {
+    let response_str = serde_json::to_string(&response).unwrap();
+    debug!(response = %response_str, "Sending response");
+    stdout.write_all(response_str.as_bytes()).await?;
+    stdout.write_all(b"
+").await?;
+    stdout.flush().await
+}
+
 /// Main Daedra MCP server
 pub struct DaedraServer {
     handler: DaedraHandler,
@@ -554,46 +599,13 @@ impl DaedraServer {
         info!("Starting STDIO transport");
 
         let stdin = tokio::io::stdin();
-        let mut stdout = tokio::io::stdout();
+        let mut stdout = tokio::io::BufWriter::new(tokio::io::stdout());
         let reader = BufReader::new(stdin);
         let mut lines = reader.lines();
 
-        // Process JSON-RPC messages line by line
         while let Ok(Some(line)) = lines.next_line().await {
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            debug!(request = %line, "Received request");
-
-            // Parse the request
-            let request: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(r) => r,
-                Err(e) => {
-                    let error_response =
-                        JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e));
-                    let response_str = serde_json::to_string(&error_response).unwrap();
-                    stdout.write_all(response_str.as_bytes()).await?;
-                    stdout.write_all(b"\n").await?;
-                    stdout.flush().await?;
-                    continue;
-                },
-            };
-
-            // Notifications (missing id or id: null) don't get responses per JSON-RPC 2.0 spec
-            let is_notification = request.id.is_none()
-                || matches!(&request.id, Some(Value::Null));
-
-            // Handle the request
-            let response = self.handler.handle_request(request).await;
-
-            // Only send response for requests (not notifications)
-            if !is_notification {
-                let response_str = serde_json::to_string(&response).unwrap();
-                debug!(response = %response_str, "Sending response");
-                stdout.write_all(response_str.as_bytes()).await?;
-                stdout.write_all(b"\n").await?;
-                stdout.flush().await?;
+            if let Some(response) = process_stdio_line(&line, &self.handler).await {
+                write_stdio_response(response, &mut stdout).await?;
             }
         }
 
@@ -854,5 +866,133 @@ mod tests {
             "initialized should not return error"
         );
         assert!(response.result.is_some());
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_call_tool_web_search() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "tools/call".to_string(),
+            params: Some(json!({"name": "web_search", "arguments": {"query": "test"}})),
+        };
+
+        let response = handler.handle_request(request).await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], false);
+        assert!(result["content"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_call_tool_unknown() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "tools/call".to_string(),
+            params: Some(json!({"name": "nonexistent", "arguments": {}})),
+        };
+
+        let response = handler.handle_request(request).await;
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[tokio::test]
+    async fn test_handle_call_tool_missing_params() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "tools/call".to_string(),
+            params: None,
+        };
+
+        let response = handler.handle_request(request).await;
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[test]
+    fn test_is_notification_no_id() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            method: "initialized".to_string(),
+            params: None,
+        };
+        assert!(is_notification(&request));
+    }
+
+    #[test]
+    fn test_is_notification_null_id() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(Value::Null),
+            method: "initialized".to_string(),
+            params: None,
+        };
+        assert!(is_notification(&request));
+    }
+
+    #[test]
+    fn test_is_notification_with_id() {
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "ping".to_string(),
+            params: None,
+        };
+        assert!(!is_notification(&request));
+    }
+
+    #[tokio::test]
+    async fn test_json_rpc_parse_error() {
+        let config = ServerConfig::default();
+        let handler = DaedraHandler::new(config).unwrap();
+
+        let request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "tools/call".to_string(),
+            params: Some(json!({"name": "web_search", "arguments": {"not_query": true}})),
+        };
+
+        let response = handler.handle_request(request).await;
+        assert!(response.error.is_some());
+        assert_eq!(response.error.unwrap().code, -32602);
+    }
+
+    #[tokio::test]
+    async fn test_execute_search_caches_results() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let args = SearchArgs {
+            query: "cache-test-unique-query-xyz".to_string(),
+            options: None,
+        };
+        let options = args.options.clone().unwrap_or_default();
+        let cached_response = SearchResponse::new(args.query.clone(), vec![], &options);
+        handler
+            .cache()
+            .set_search(
+                &args.query,
+                &options.region,
+                &options.safe_search.to_string(),
+                cached_response.clone(),
+            )
+            .await;
+
+        let result = handler.execute_search(args).await.unwrap();
+        assert_eq!(result.data.len(), cached_response.data.len());
+        assert_eq!(result.metadata.query, cached_response.metadata.query);
     }
 }
