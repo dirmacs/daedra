@@ -1073,4 +1073,94 @@ mod tests {
         assert!(response.error.is_none());
         assert!(response.result.is_some());
     }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_execute_search_returns_results() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let args = SearchArgs {
+            query: "Rust programming language".to_string(),
+            options: Some(crate::types::SearchOptions {
+                num_results: 5,
+                ..Default::default()
+            }),
+        };
+        let response = handler.execute_search(args).await.unwrap();
+        assert!(!response.data.is_empty(), "search should return results");
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_execute_search_caches_on_second_call() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let args = SearchArgs {
+            query: "cache-second-call-unique-query-abc".to_string(),
+            options: None,
+        };
+        let first = handler.execute_search(args.clone()).await;
+        let second = handler.execute_search(args).await;
+        assert!(first.is_ok(), "first search should succeed: {:?}", first.err());
+        assert!(second.is_ok(), "second search should succeed: {:?}", second.err());
+        assert!(!first.unwrap().data.is_empty());
+        assert!(!second.unwrap().data.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_handle_visit_page_invalid_url() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method(
+                "tools/call",
+                Some(json!(1)),
+                Some(json!({
+                    "name": "visit_page",
+                    "arguments": {"url": "ftp://example.com"}
+                })),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], true);
+        let text = result["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Invalid URL"));
+    }
+
+    #[tokio::test]
+    #[ignore = "network"]
+    async fn test_handle_method_tools_call_web_search() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method(
+                "tools/call",
+                Some(json!(1)),
+                Some(json!({
+                    "name": "web_search",
+                    "arguments": {"query": "test"}
+                })),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], false);
+        assert!(result["content"].as_array().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_handle_method_tools_call_visit_page_invalid() {
+        let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
+        let response = handler
+            .handle_method(
+                "tools/call",
+                Some(json!(1)),
+                Some(json!({
+                    "name": "visit_page",
+                    "arguments": {"url": "not-a-url"}
+                })),
+            )
+            .await;
+        assert!(response.error.is_none());
+        let result = response.result.unwrap();
+        assert_eq!(result["isError"], true);
+    }
+
 }

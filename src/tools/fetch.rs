@@ -696,33 +696,26 @@ fn html_to_markdown(html: &str) -> String {
 
 /// Clean up Markdown content
 fn clean_markdown(markdown: &str) -> String {
-    let lines: Vec<&str> = markdown.lines().collect();
-
-    // Remove excessive blank lines
-    let mut result = String::new();
-    let mut prev_blank = false;
-
-    for line in lines.iter() {
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() {
-            if !prev_blank {
-                result.push('\n');
-                prev_blank = true;
+    markdown
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed != "-" && trimmed != "*" && trimmed != "+"
+        })
+        .fold(String::new(), |mut acc, line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                if !acc.ends_with("\n\n") {
+                    acc.push('\n');
+                }
+            } else {
+                acc.push_str(trimmed);
+                acc.push('\n');
             }
-        } else {
-            // Skip lines that are just list markers
-            if trimmed == "-" || trimmed == "*" || trimmed == "+" {
-                continue;
-            }
-
-            result.push_str(trimmed);
-            result.push('\n');
-            prev_blank = false;
-        }
-    }
-
-    result.trim().to_string()
+            acc
+        })
+        .trim()
+        .to_string()
 }
 
 /// Clean up a page title
@@ -755,6 +748,23 @@ impl FetchClient {
     ) -> DaedraResult<String> {
         let document = Html::parse_document(html);
         self.extract_content(html, &document, "", selector)
+    }
+
+    /// Same path as [`FetchClient::build_page_from_html`] without HTTP.
+    pub fn build_page_from_html_for_tests(
+        &self,
+        html: &str,
+        url: &str,
+        selector: Option<&str>,
+    ) -> DaedraResult<PageContent> {
+        let parsed_url = validate_url(url)?;
+        self.build_page_from_html(html, url, &parsed_url, selector)
+    }
+
+    /// Exposes bot-protection checks for unit tests.
+    pub fn check_bot_protection_for_tests(&self, html: &str) -> DaedraResult<()> {
+        let document = Html::parse_document(html);
+        self.check_bot_protection(&document)
     }
 }
 
@@ -815,6 +825,34 @@ mod tests {
         let input = "# Title\n\n\n\nParagraph\n\n\n\n\n\nAnother paragraph";
         let expected = "# Title\n\nParagraph\n\nAnother paragraph";
         assert_eq!(clean_markdown(input), expected);
+    }
+
+    #[test]
+    fn test_clean_markdown_excessive_blanks() {
+        let input = "Line one\n\n\n\n\nLine two";
+        assert_eq!(clean_markdown(input), "Line one\n\nLine two");
+    }
+
+    #[test]
+    fn test_clean_markdown_strips_list_markers() {
+        let input = "Content\n-\n*\n+\nMore";
+        assert_eq!(clean_markdown(input), "Content\nMore");
+    }
+
+    #[test]
+    fn test_clean_markdown_preserves_content() {
+        let input = "# Heading\n\nParagraph with **bold** text.";
+        assert_eq!(clean_markdown(input), "# Heading\n\nParagraph with **bold** text.");
+    }
+
+    #[test]
+    fn test_clean_markdown_empty_input() {
+        assert_eq!(clean_markdown(""), "");
+    }
+
+    #[test]
+    fn test_clean_markdown_only_blanks() {
+        assert_eq!(clean_markdown("\n\n\n\n"), "");
     }
 
     #[test]
@@ -1076,4 +1114,139 @@ mod tests {
         assert!(!is_known_binary_content_type("text/html"));
         assert!(!is_known_binary_content_type("application/json"));
     }
+
+    #[test]
+    fn test_build_page_from_html_basic() {
+        let html = r#"<html><head><title>Test Page</title></head><body>
+            <article><p>Hello world from the test article body content here.</p></article>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let page = client
+            .build_page_from_html_for_tests(html, "https://example.com/page", None)
+            .unwrap();
+        assert_eq!(page.title, "Test Page");
+        assert_eq!(page.url, "https://example.com/page");
+        assert!(page.word_count > 0);
+        assert!(!page.content.is_empty());
+    }
+
+    #[test]
+    fn test_build_page_from_html_with_selector() {
+        let html = r#"<html><head><title>Site</title></head><body>
+            <div id="sidebar">Sidebar noise should not appear in output.</div>
+            <div id="main"><p>Main region only content for selector test case.</p></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let page = client
+            .build_page_from_html_for_tests(html, "https://example.com", Some("#main"))
+            .unwrap();
+        assert!(page.content.contains("Main region only"));
+        assert!(!page.content.contains("Sidebar noise"));
+    }
+
+    #[test]
+    fn test_build_page_from_html_with_links() {
+        let words: String = (0..55)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let html = format!(
+            r#"<html><head><title>Links Page</title></head><body>
+            <article><p>{words}</p>
+            <a href="https://example.com/one">First Link</a>
+            <a href="https://example.com/two">Second Link</a>
+            </article></body></html>"#
+        );
+        let client = FetchClient::default();
+        let page = client
+            .build_page_from_html_for_tests(&html, "https://example.com", None)
+            .unwrap();
+        assert!(page.word_count >= 50);
+        let links = page.links.expect("expected links for long pages");
+        assert!(!links.is_empty());
+        assert!(links.iter().any(|l| l.url.contains("example.com/one")));
+    }
+
+    #[test]
+    fn test_build_page_from_html_short_no_links() {
+        let html = r#"<html><head><title>Short</title></head><body>
+            <p>Brief page.</p>
+            <a href="https://example.com/link">Link</a>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let page = client
+            .build_page_from_html_for_tests(html, "https://example.com/short", None)
+            .unwrap();
+        assert!(page.word_count < 50);
+        assert!(page.links.is_none());
+    }
+
+    #[test]
+    fn test_check_bot_protection_clean() {
+        let html = r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
+        let client = FetchClient::default();
+        assert!(client.check_bot_protection_for_tests(html).is_ok());
+    }
+
+    #[test]
+    fn test_check_bot_protection_cf_challenge() {
+        let html = r#"<html><head><title>Checking</title></head><body>
+            <div id="cf-challenge-running"></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let err = client.check_bot_protection_for_tests(html).unwrap_err();
+        assert!(matches!(err, DaedraError::BotProtectionDetected));
+    }
+
+    #[test]
+    fn test_check_bot_protection_suspicious_title() {
+        let html = r#"<html><head><title>Just a moment...</title></head><body></body></html>"#;
+        let client = FetchClient::default();
+        let err = client.check_bot_protection_for_tests(html).unwrap_err();
+        assert!(matches!(err, DaedraError::BotProtectionDetected));
+    }
+
+    #[test]
+    fn test_extract_content_with_readability() {
+        let words: String = (0..60)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let html = format!(
+            "<html><head><title>Article</title></head><body><article><p>{words}</p></article></body></html>"
+        );
+        let client = FetchClient::default();
+        let content = client
+            .extract_content_from_html_for_tests(&html, None)
+            .unwrap();
+        assert!(word_count(&content) >= 50);
+        assert!(content.contains("word0"));
+    }
+
+    #[test]
+    fn test_extract_content_with_selector() {
+        let html = r#"<html><body>
+            <div class="noise">Ignored sidebar text here.</div>
+            <div id="target"><p>Selected fragment only.</p></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let content = client
+            .extract_content_from_html_for_tests(html, Some("#target"))
+            .unwrap();
+        assert!(content.contains("Selected fragment only"));
+        assert!(!content.contains("Ignored sidebar"));
+    }
+
+    #[test]
+    fn test_extract_content_fallback_to_body() {
+        let html = r#"<html><body>
+            <div class="wrapper"><p>Body fallback content without article or main tags.</p></div>
+        </body></html>"#;
+        let client = FetchClient::default();
+        let content = client
+            .extract_content_from_html_for_tests(html, None)
+            .unwrap();
+        assert!(content.contains("Body fallback content"));
+    }
+
 }
