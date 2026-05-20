@@ -20,7 +20,7 @@
 use crate::tools::fetch::fetch_page;
 use crate::types::{
     CrawlArgs, CrawlError, CrawlResult, CrawlSummary, CrawledPage, DaedraError, DaedraResult,
-    VisitPageArgs,
+    PageContent, VisitPageArgs,
 };
 use lazy_static::lazy_static;
 use reqwest::Client;
@@ -199,50 +199,26 @@ fn rank_urls_by_path_length(urls: &mut [Url]) {
     urls.sort_by_key(|u| u.path().len());
 }
 
-/// Walk a site deeply, returning extracted page content for each URL.
-///
-/// The caller supplies a URL and a page budget. daedra finds the URLs
-/// (sitemap first, HTML anchors second), fetches them under a concurrency
-/// semaphore, converts each to markdown via the existing `visit_page`
-/// pipeline, and returns a structured result with per-URL success/error
-/// buckets.
-pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
-    let root = Url::parse(&args.root_url)
-        .map_err(|e| DaedraError::InvalidArguments(format!("invalid root_url: {}", e)))?;
-
-    let (max_pages, concurrency) = clamp_crawl_args(args.max_pages, args.concurrency);
-
-    let client = Client::builder()
-        .user_agent(USER_AGENT)
-        .timeout(SITEMAP_TIMEOUT)
-        .gzip(true)
-        .brotli(true)
-        .build()
-        .map_err(|e| DaedraError::FetchError(format!("http client build: {}", e)))?;
-
-    // 1) discovery
-    let (mut candidates, sitemap_found) = match discover_sitemap(&client, &root).await? {
-        Some(urls) => (urls, true),
+/// Discover crawl candidates: sitemap first, HTML anchors as fallback.
+async fn discover_urls(
+    client: &Client,
+    root: &Url,
+    max_pages: usize,
+) -> DaedraResult<(Vec<Url>, bool)> {
+    match discover_sitemap(client, root).await? {
+        Some(urls) => Ok((urls, true)),
         None => {
-            let urls = discover_via_anchors(&client, &root, max_pages * 2).await?;
-            (urls, false)
+            let urls = discover_via_anchors(client, root, max_pages * 2).await?;
+            Ok((urls, false))
         }
-    };
+    }
+}
 
-    // 2) cap + deterministic order (shortest-path first as a weak relevance
-    // heuristic — the consumer is expected to re-rank with an LLM if needed)
-    rank_urls_by_path_length(&mut candidates);
-    candidates.truncate(max_pages);
-
-    info!(
-        root = %root,
-        sitemap_found,
-        candidates = candidates.len(),
-        concurrency,
-        "crawl_site starting"
-    );
-
-    // 3) bounded concurrent fetch
+/// Spawn semaphore-guarded fetch tasks for each candidate URL.
+async fn fetch_candidates_concurrently(
+    candidates: Vec<Url>,
+    concurrency: usize,
+) -> Vec<tokio::task::JoinHandle<Option<(String, DaedraResult<PageContent>)>>> {
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut handles = Vec::with_capacity(candidates.len());
     for url in candidates {
@@ -258,7 +234,14 @@ pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
             Some((args.url, result))
         }));
     }
+    handles
+}
 
+/// Join fetch tasks and partition results into pages and errors.
+async fn collect_crawl_results(
+    handles: Vec<tokio::task::JoinHandle<Option<(String, DaedraResult<PageContent>)>>>,
+    _requested: usize,
+) -> (Vec<CrawledPage>, Vec<CrawlError>) {
     let mut pages: Vec<CrawledPage> = Vec::new();
     let mut errors: Vec<CrawlError> = Vec::new();
     for handle in handles {
@@ -282,11 +265,48 @@ pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
                 error: e.to_string(),
             }),
             Ok(None) | Err(_) => {
-                // semaphore closed or task panic — already logged at the fetch
-                // site; skip silently so one bad URL can't poison the batch
+                // semaphore closed or task panic — skip silently
             }
         }
     }
+    (pages, errors)
+}
+
+/// Walk a site deeply, returning extracted page content for each URL.
+///
+/// The caller supplies a URL and a page budget. daedra finds the URLs
+/// (sitemap first, HTML anchors second), fetches them under a concurrency
+/// semaphore, converts each to markdown via the existing `visit_page`
+/// pipeline, and returns a structured result with per-URL success/error
+/// buckets.
+pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
+    let root = Url::parse(&args.root_url)
+        .map_err(|e| DaedraError::InvalidArguments(format!("invalid root_url: {}", e)))?;
+
+    let (max_pages, concurrency) = clamp_crawl_args(args.max_pages, args.concurrency);
+
+    let client = Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(SITEMAP_TIMEOUT)
+        .gzip(true)
+        .brotli(true)
+        .build()
+        .map_err(|e| DaedraError::FetchError(format!("http client build: {}", e)))?;
+
+    let (mut candidates, sitemap_found) = discover_urls(&client, &root, max_pages).await?;
+    rank_urls_by_path_length(&mut candidates);
+    candidates.truncate(max_pages);
+
+    info!(
+        root = %root,
+        sitemap_found,
+        candidates = candidates.len(),
+        concurrency,
+        "crawl_site starting"
+    );
+
+    let handles = fetch_candidates_concurrently(candidates, concurrency).await;
+    let (pages, errors) = collect_crawl_results(handles, max_pages).await;
 
     Ok(CrawlResult {
         root_url: root.to_string(),
@@ -366,4 +386,65 @@ mod tests {
         assert!(parse_sitemap("").is_empty());
         assert!(parse_sitemap("<?xml version=\"1.0\"?><urlset></urlset>").is_empty());
     }
+    #[test]
+    fn test_clamp_crawl_args_min() {
+        assert_eq!(clamp_crawl_args(0, 0), (1, 1));
+    }
+
+    #[test]
+    fn test_clamp_crawl_args_max() {
+        assert_eq!(clamp_crawl_args(1000, 100), (500, 16));
+    }
+
+    #[test]
+    fn test_clamp_crawl_args_passthrough() {
+        assert_eq!(clamp_crawl_args(10, 4), (10, 4));
+    }
+
+    #[test]
+    fn test_rank_urls_by_path_length() {
+        let mut urls = vec![
+            Url::parse("https://example.com/b/c/d").unwrap(),
+            Url::parse("https://example.com/a").unwrap(),
+            Url::parse("https://example.com/e/f").unwrap(),
+        ];
+        rank_urls_by_path_length(&mut urls);
+        let paths: Vec<_> = urls.iter().map(|u| u.path().len()).collect();
+        assert_eq!(paths, [2, 4, 6]);
+        assert_eq!(urls[0].path(), "/a");
+        assert_eq!(urls[1].path(), "/e/f");
+        assert_eq!(urls[2].path(), "/b/c/d");
+    }
+
+    #[test]
+    fn test_parse_sitemap_unclosed_loc() {
+        assert!(parse_sitemap("<loc>no closing tag").is_empty());
+    }
+
+    #[test]
+    fn test_parse_sitemap_mixed_valid_invalid() {
+        let xml = r#"<urlset>
+            <url><loc>not-a-url</loc></url>
+            <url><loc>https://example.com/ok</loc></url>
+            <url><loc>   </loc></url>
+        </urlset>"#;
+        let urls = parse_sitemap(xml);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].as_str(), "https://example.com/ok");
+    }
+
+    #[test]
+    fn test_parse_sitemap_xml_with_comments() {
+        let xml = r#"<?xml version="1.0"?>
+<urlset>
+  <url><loc>https://example.com/first</loc></url>
+  <!-- comment between loc tags -->
+  <url><loc>https://example.com/second</loc></url>
+</urlset>"#;
+        let urls = parse_sitemap(xml);
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0].as_str(), "https://example.com/first");
+        assert_eq!(urls[1].as_str(), "https://example.com/second");
+    }
+
 }
