@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 9 backends with automatic fallback. Works from any IP."
