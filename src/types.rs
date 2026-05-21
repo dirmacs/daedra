@@ -601,6 +601,7 @@ pub fn visit_page_args_schema() -> serde_json::Value {
     })
 }
 
+/// Returns the JSON Schema for the crawl_site tool arguments.
 pub fn crawl_args_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",

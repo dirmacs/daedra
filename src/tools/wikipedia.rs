@@ -15,11 +15,13 @@ use tracing::info;
 
 const WIKIPEDIA_API: &str = "https://en.wikipedia.org/w/api.php";
 
+/// Wikipedia API backend — searches Wikipedia articles via the MediaWiki API.
 pub struct WikipediaBackend {
     client: Client,
 }
 
 impl WikipediaBackend {
+    /// Create a new Wikipedia backend instance.
     pub fn new() -> Self {
         let client = Client::builder()
             .user_agent("daedra/1.0 (search MCP server)")

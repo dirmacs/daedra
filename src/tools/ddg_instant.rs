@@ -17,6 +17,7 @@ use tracing::info;
 
 const DDG_API: &str = "https://api.duckduckgo.com/";
 
+/// DuckDuckGo Instant Answer API backend — returns abstract/topic results from the DDG API.
 pub struct DdgInstantBackend {
     client: Client,
 }
@@ -34,6 +35,7 @@ struct DdgResponse {
 }
 
 impl DdgInstantBackend {
+    /// Create a new DuckDuckGo Instant Answer backend instance.
     pub fn new() -> Self {
         let client = Client::builder()
             .user_agent("daedra/1.0")

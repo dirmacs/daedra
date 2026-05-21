@@ -10,8 +10,8 @@ use daedra::{
     server::{DaedraServer, ServerConfig, TransportType},
     tools::{crawl_site, fetch, search},
     types::{
-        ContentType, CrawlArgs, CrawlResult, DaedraError, PageContent, PageLink, ResultMetadata,
-        SafeSearchLevel, SearchArgs, SearchOptions, SearchResult, VisitPageArgs,
+        CrawlArgs, CrawlResult, DaedraError, PageContent, SafeSearchLevel, SearchArgs,
+        SearchOptions, SearchResult, VisitPageArgs,
     },
 };
 use std::time::Duration;
@@ -179,6 +179,7 @@ impl From<SafeSearchOption> for SafeSearchLevel {
 }
 
 
+#[cfg(test)]
 fn safe_search_from_u8(v: u8) -> Option<SafeSearchLevel> {
     match v {
         0 => Some(SafeSearchLevel::Off),
@@ -865,6 +866,7 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use daedra::types::{ContentType, PageLink, ResultMetadata};
 
     #[test]
     fn test_should_print_banner_verbose_sse() {

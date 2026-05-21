@@ -18,9 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{info, warn};
 
-/// In-memory circuit breaker for a single backend.
-/// After 3 consecutive failures, opens the circuit (marks backend unhealthy).
-/// After 30s cooldown, allows one probe request. If it succeeds, closes the circuit.
+/// Circuit breaker state for a single backend — opens after consecutive failures, cools down, then probes.
 #[derive(Debug)]
 pub struct BackendHealth {
     consecutive_failures: AtomicU32,
@@ -31,6 +29,7 @@ pub struct BackendHealth {
 }
 
 impl BackendHealth {
+    /// Create a new circuit breaker that opens after `failure_threshold` consecutive failures and stays open for `cooldown` duration.
     pub fn new(failure_threshold: u32, cooldown: Duration) -> Self {
         Self {
             consecutive_failures: AtomicU32::new(0),
@@ -50,11 +49,13 @@ impl BackendHealth {
         last.elapsed() >= self.cooldown
     }
 
+    /// Record a successful request — resets consecutive failure count and closes the circuit.
     pub fn record_success(&self) {
         self.consecutive_failures.store(0, Ordering::Relaxed);
         self.is_open.store(false, Ordering::Relaxed);
     }
 
+    /// Record a failed request — increments failure count and opens the circuit when threshold is reached.
     pub fn record_failure(&self) {
         let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
         *self.last_failure.lock().expect("last_failure lock") = std::time::Instant::now();
@@ -521,6 +522,7 @@ impl SearchProvider {
         merged
     }
 
+    /// Execute a search across all backends with fallback, rate limiting, and circuit breaker protection.
     pub async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
         let target_count = opts.num_results;

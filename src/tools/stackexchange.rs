@@ -16,6 +16,7 @@ use tracing::info;
 
 const STACKEXCHANGE_API: &str = "https://api.stackexchange.com/2.3/search/advanced";
 
+/// StackExchange API backend — searches StackOverflow and related sites.
 pub struct StackExchangeBackend {
     client: Client,
 }
@@ -36,6 +37,7 @@ struct SeItem {
 }
 
 impl StackExchangeBackend {
+    /// Create a new StackExchange backend instance.
     pub fn new() -> Self {
         let client = Client::builder()
             .user_agent("daedra/1.0")
