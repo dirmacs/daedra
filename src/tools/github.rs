@@ -16,6 +16,7 @@ use tracing::info;
 
 const GITHUB_API: &str = "https://api.github.com/search/repositories";
 
+/// GitHub search backend — searches repositories, issues, and code via GitHub's search endpoint.
 pub struct GitHubBackend {
     client: Client,
     token: Option<String>,
@@ -36,6 +37,7 @@ struct GhRepo {
 }
 
 impl GitHubBackend {
+    /// Create a new GitHub search backend instance.
     pub fn new() -> Self {
         let token = std::env::var("GITHUB_TOKEN").ok().filter(|t| !t.is_empty());
         let client = Client::builder()

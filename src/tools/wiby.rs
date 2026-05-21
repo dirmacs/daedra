@@ -16,6 +16,7 @@ use tracing::info;
 
 const WIBY_API: &str = "https://wiby.me/json/";
 
+/// Wiby.me search backend — lightweight search engine for the small web.
 pub struct WibyBackend {
     client: Client,
 }
@@ -31,6 +32,7 @@ struct WibyResult {
 }
 
 impl WibyBackend {
+    /// Create a new Wiby backend instance.
     pub fn new() -> Self {
         let client = Client::builder()
             .user_agent("daedra/1.0")

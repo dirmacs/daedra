@@ -56,11 +56,13 @@ fn extract_bing_result(element: &ElementRef) -> Option<SearchResult> {
     })
 }
 
+/// Bing HTML scraping backend — parses search results from bing.com SERP pages.
 pub struct BingBackend {
     client: Client,
 }
 
 impl BingBackend {
+    /// Create a new Bing backend instance.
     pub fn new() -> Self {
         let client = Client::builder()
             .user_agent(USER_AGENT)

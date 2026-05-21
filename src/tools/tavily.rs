@@ -16,6 +16,7 @@ use tracing::info;
 
 const TAVILY_URL: &str = "https://api.tavily.com/search";
 
+/// Tavily Search API backend — AI-optimized search results, requires an API key.
 pub struct TavilyBackend {
     client: Client,
     api_key: String,
@@ -34,6 +35,7 @@ struct TavilyResult {
 }
 
 impl TavilyBackend {
+    /// Create a new Tavily backend instance.
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))

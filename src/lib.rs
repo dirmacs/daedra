@@ -62,6 +62,7 @@ pub mod cache;
 pub mod server;
 pub mod tools;
 pub mod types;
+/// URL classification rules for categorizing search results by domain pattern.
 pub mod url_classification;
 
 // Re-export commonly used items at crate root

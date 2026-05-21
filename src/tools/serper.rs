@@ -16,6 +16,7 @@ use tracing::info;
 
 const SERPER_URL: &str = "https://google.serper.dev/search";
 
+/// Serper.dev Google Search API backend — requires an API key.
 pub struct SerperBackend {
     client: Client,
     api_key: String,
@@ -34,6 +35,7 @@ struct SerperResult {
 }
 
 impl SerperBackend {
+    /// Create a new Serper backend instance.
     pub fn new(api_key: String) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))

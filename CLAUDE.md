@@ -1,6 +1,6 @@
 # daedra
 
-Self-contained web search MCP server. 9 backends, automatic fallback, works from any IP. No API keys required for basic search. **v0.3.0** (upcoming crates.io bump).
+Self-contained web search MCP server. 9 backends, automatic fallback, works from any IP. No API keys required for basic search.
 
 ## Build & Test
 
