@@ -1,65 +1,22 @@
-# Build stage
-FROM rust:1.91-slim-bookworm AS builder
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create a new empty project
-WORKDIR /app
-
-# Copy manifests
-COPY Cargo.toml Cargo.lock ./
-
-# Create dummy source to cache dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    echo "pub fn lib() {}" > src/lib.rs
-
-# Build dependencies only (this layer will be cached)
-RUN cargo build --release && \
-    rm -rf src target/release/deps/daedra*
-
-# Copy actual source code
-COPY src ./src
-COPY benches ./benches
-COPY tests ./tests
-
-# Build the actual application
-RUN cargo build --release
-
-# Runtime stage
+# Runtime-only image (binary pre-built on host)
 FROM debian:bookworm-slim
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --uid 1000 --shell /bin/bash daedra
 
-# Create non-root user
-RUN useradd -m -u 1000 -s /bin/bash daedra
+COPY target/release/daedra /usr/local/bin/daedra
+RUN chmod +x /usr/local/bin/daedra
 
-# Copy the binary from builder
-COPY --from=builder /app/target/release/daedra /usr/local/bin/daedra
-
-# Set ownership
-RUN chown daedra:daedra /usr/local/bin/daedra
-
-# Switch to non-root user
+WORKDIR /app
 USER daedra
 
-# Set working directory
-WORKDIR /home/daedra
+EXPOSE 3400
 
-# Expose SSE port
-EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:3400/health || exit 1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD daedra check || exit 1
-
-# Default command (STDIO transport)
 ENTRYPOINT ["daedra"]
-CMD ["serve", "--transport", "stdio"]
+CMD ["serve", "--transport", "sse", "--port", "3400", "--host", "127.0.0.1"]
