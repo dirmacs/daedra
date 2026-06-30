@@ -1,0 +1,20 @@
+# daedra: web search MCP server (SSE transport)
+services:
+  daedra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dirmacs/daedra:local
+    container_name: daedra
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    environment:
+      - RUST_LOG=daedra=info
+    command: ["serve", "--transport", "sse", "--port", "3400", "--host", "127.0.0.1"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3400/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
