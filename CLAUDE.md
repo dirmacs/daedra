@@ -1,6 +1,6 @@
 # daedra
 
-Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP. No API keys are required for basic search.
+Self-contained web search MCP server. 16 backends with automatic fallback. Works from any IP. No API keys are required for basic search.
 
 ## Build and test
 

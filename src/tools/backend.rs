@@ -215,9 +215,23 @@ impl SearchProvider {
             backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
         }
 
+        // Mojeek — independent crawler index, no API key, bot-tolerant from
+        // residential IPs; 403s from datacenter IPs (circuit breaker then
+        // sidelines it).
+        info!("Mojeek backend enabled (no API key, independent index)");
+        backends.push(Box::new(super::mojeek::MojeekBackend::new()));
+
+        // Brave HTML — general index, no API key; 429s from datacenter IPs.
+        info!("Brave backend enabled (no API key, may rate-limit datacenter IPs)");
+        backends.push(Box::new(super::brave::BraveBackend::new()));
+
+        // Marginalia public API — independent non-commercial index, answers
+        // from any IP. Strong for docs and technical content.
+        info!("Marginalia backend enabled (no API key, answers from any IP)");
+        backends.push(Box::new(super::marginalia::MarginaliaBackend::new()));
+
         // Bing via its machine-readable RSS output — same index as the HTML
-        // SERP, served to integrations without challenge pages. First no-key
-        // general web backend tried.
+        // SERP, served to integrations without challenge pages.
         info!("Bing RSS backend enabled (no API key, bot-tolerant machine format)");
         backends.push(Box::new(super::rss::BingRssBackend::new()));
 
@@ -545,19 +559,43 @@ cuit_note}",
         target_count: usize,
     ) -> Vec<crate::types::SearchResult> {
         let tokens = query_tokens(query);
+        // Canonical-key counting across sources: a result that two or more
+        // engines agree on gets a corroboration boost in its score.
+        let mut corroboration: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (_, results) in by_source {
+            let mut seen_here: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for r in results {
+                if let Some(key) = canonical_url_key(&r.url)
+                    && seen_here.insert(key.clone())
+                {
+                    *corroboration.entry(key).or_insert(0) += 1;
+                }
+            }
+        }
+
         let mut queues: Vec<std::vec::IntoIter<(f64, crate::types::SearchResult)>> = by_source
             .iter()
             .map(|(_, results)| {
                 let mut scored: Vec<(f64, crate::types::SearchResult)> = results
                     .iter()
-                    .map(|r| (relevance_score(r, &tokens), r.clone()))
+                    .map(|r| {
+                        let mut s = relevance_score(r, &tokens);
+                        // Corroboration boost: +0.35 per agreeing source
+                        // beyond the first, capped at +0.7.
+                        if let Some(key) = canonical_url_key(&r.url) {
+                            let agreeing = corroboration.get(&key).copied().unwrap_or(1);
+                            s += 0.35 * (agreeing.saturating_sub(1)).min(2) as f64;
+                        }
+                        (s, r.clone())
+                    })
                     .collect();
                 scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
                 scored.into_iter()
             })
             .collect();
 
-        let mut seen = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut merged = Vec::with_capacity(target_count);
         // Start index for tie-breaks: equal best scores rotate across sources
         // so the merge interleaves them exactly like the old round-robin.
@@ -566,7 +604,8 @@ cuit_note}",
         while merged.len() < target_count {
             for q in queues.iter_mut() {
                 while let Some((_, r)) = q.as_slice().first() {
-                    if seen.contains(&r.url) {
+                    let seen_key = canonical_url_key(&r.url).unwrap_or_else(|| r.url.clone());
+                    if seen.contains(&seen_key) {
                         q.next();
                     } else {
                         break;
@@ -598,7 +637,8 @@ cuit_note}",
             }
             let Some(i) = picked else { break };
             if let Some((_, r)) = queues[i].next() {
-                seen.insert(r.url.clone());
+                let key = canonical_url_key(&r.url).unwrap_or_else(|| r.url.clone());
+                seen.insert(key);
                 merged.push(r);
                 rr = (i + 1) % queues.len();
             }
@@ -726,6 +766,40 @@ cuit_note}",
             .map(|b| b.name())
             .collect()
     }
+}
+
+/// Canonical identity of a result URL for dedup and cross-engine
+/// corroboration: lowercase host without `www.`, path without a trailing
+/// slash, query stripped of tracking parameters. `None` when the URL does
+/// not parse; the raw string is used instead in that case.
+fn canonical_url_key(url: &str) -> Option<String> {
+    let u = url::Url::parse(url).ok()?;
+    let host = u
+        .host_str()?
+        .trim_start_matches("www.")
+        .to_ascii_lowercase();
+    let mut path = u.path().trim_end_matches('/').to_string();
+    if path.is_empty() {
+        path.push('/');
+    }
+    let kept: Vec<String> = u
+        .query_pairs()
+        .filter(|(k, _)| {
+            let k = k.to_ascii_lowercase();
+            !(k.starts_with("utm_")
+                || matches!(
+                    k.as_ref(),
+                    "fbclid" | "gclid" | "ref" | "spm" | "mc_cid" | "mc_eid"
+                ))
+        })
+        .map(|(k, v)| format!("{}={}", urlencoding::encode(&k), urlencoding::encode(&v)))
+        .collect();
+    let query = if kept.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", kept.join("&"))
+    };
+    Some(format!("{host}{path}{query}"))
 }
 
 /// Words too common to carry query meaning. Kept deliberately small: a
@@ -1001,6 +1075,37 @@ mod tests {
         assert_eq!(relevance_score(&r, &tokens), 2.0);
         // No signal at all: neutral score keeps the plain round-robin order.
         assert_eq!(relevance_score(&r, &[]), 1.0);
+    }
+
+    #[test]
+    fn test_canonical_url_key_dedup_and_tracking() {
+        let a = canonical_url_key("https://www.Example.com/docs/guide/?utm_source=x").unwrap();
+        let b = canonical_url_key("https://example.com/docs/guide").unwrap();
+        assert_eq!(a, b, "www, trailing slash, utm params must not matter");
+        let c = canonical_url_key("https://example.com/docs/other").unwrap();
+        assert_ne!(a, c);
+        assert!(canonical_url_key("not a url").is_none());
+    }
+
+    #[test]
+    fn test_merge_corroboration_boost() {
+        // The same page found by two engines outranks an otherwise equal
+        // single-engine hit.
+        let dup_a = test_search_result("https://tokio.rs/", "Tokio runtime");
+        let dup_b = test_search_result("https://www.tokio.rs/?utm_source=x", "Tokio runtime");
+        let other = test_search_result("https://other.test/tokio", "Tokio runtime guide");
+        let by_source = vec![
+            ("a".to_string(), vec![other]),
+            ("b".to_string(), vec![dup_a]),
+            ("c".to_string(), vec![dup_b]),
+        ];
+        let merged = SearchProvider::merge_ranked_results(&by_source, "tokio runtime", 3);
+        assert_eq!(
+            merged[0].url, "https://tokio.rs/",
+            "corroborated result first"
+        );
+        // The www/utm variant is deduped by canonical key.
+        assert_eq!(merged.len(), 2);
     }
 
     #[test]

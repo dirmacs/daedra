@@ -10,11 +10,14 @@
 
 pub mod backend;
 pub mod bing;
+pub mod brave;
 pub mod crawl;
 pub mod ddg_instant;
 pub mod fetch;
 pub mod github;
 pub mod google;
+pub mod marginalia;
+pub mod mojeek;
 pub mod rss;
 pub mod search;
 pub mod serper;

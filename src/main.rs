@@ -14,6 +14,7 @@ use daedra::{
         SearchOptions, SearchResult, VisitPageArgs,
     },
 };
+use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -52,7 +53,7 @@ struct Cli {
 }
 
 /// Output format options
-#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 enum OutputFormat {
     /// Pretty-printed human-readable output
     #[default]
@@ -131,6 +132,10 @@ enum Commands {
         /// Include images in output
         #[arg(long)]
         include_images: bool,
+
+        /// Per-request timeout in seconds
+        #[arg(short = 't', long, default_value = "30")]
+        timeout: u64,
     },
 
     /// Crawl a website and extract content from all discovered pages
@@ -292,7 +297,8 @@ impl Commands {
                 url,
                 selector,
                 include_images,
-            } => run_fetch(url, selector, include_images, format, no_color).await,
+                timeout,
+            } => run_fetch(url, selector, include_images, timeout, format, no_color).await,
 
             Commands::Crawl {
                 url,
@@ -318,22 +324,48 @@ impl Commands {
             },
 
             Commands::Info => {
-                run_info(no_color);
+                run_info(no_color, format);
                 Ok(())
             },
 
-            Commands::Check => run_check(no_color).await,
+            Commands::Check => run_check(no_color, format).await,
         }
     }
 }
 
 struct CheckReporter {
     no_color: bool,
+    /// Every reported outcome, kept in order so `-f json` can print the
+    /// same report machine-readably.
+    entries: std::cell::RefCell<Vec<(String, bool, String)>>,
 }
 
 impl CheckReporter {
     fn new(no_color: bool) -> Self {
-        Self { no_color }
+        Self {
+            no_color,
+            entries: std::cell::RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Emit a report entry with a stable machine key (`status`, `fetch`,
+    /// `connectivity`, `api_keys`, `backends`, `summary`).
+    fn entry(&self, key: &str, ok: bool, message: &str) {
+        self.entries
+            .borrow_mut()
+            .push((key.to_string(), ok, message.to_string()));
+    }
+
+    fn to_json(&self, all_ok: bool) -> serde_json::Value {
+        let checks: Vec<serde_json::Value> = self
+            .entries
+            .borrow()
+            .iter()
+            .map(|(key, ok, message)| {
+                serde_json::json!({ "check": key, "ok": ok, "detail": message })
+            })
+            .collect();
+        serde_json::json!({ "all_ok": all_ok, "checks": checks })
     }
 
     fn section(&self, title: &str) {
@@ -404,13 +436,49 @@ fn check_search_client(reporter: &CheckReporter) -> bool {
     match search::SearchClient::new() {
         Ok(_) => {
             reporter.ok("Search client initialized");
+            reporter.entry("status", true, "Search client initialized");
             true
         },
         Err(e) => {
             reporter.fail(&format!("Search client: {e}"));
+            reporter.entry("status", false, &format!("Search client: {e}"));
             false
         },
     }
+}
+
+/// Report which optional API keys are set. A missing key is not a failure —
+/// unkeyed search still works — but `check` must not hide the quality cliff.
+fn check_api_keys(reporter: &CheckReporter) {
+    let keys = [
+        ("SERPER_API_KEY", "Serper (top-tier Google results)"),
+        ("TAVILY_API_KEY", "Tavily (LLM-oriented search)"),
+        ("GITHUB_TOKEN", "GitHub (higher rate limits)"),
+    ];
+    let mut any_set = false;
+    for (name, what) in keys {
+        if std::env::var(name).is_ok_and(|v| !v.trim().is_empty()) {
+            reporter.ok(&format!("{name} set ({what})"));
+            any_set = true;
+        } else {
+            reporter.warn(&format!("{name} not set — {what} disabled"));
+        }
+    }
+    if !any_set {
+        reporter.warn(
+            "No API keys set: search runs on unkeyed backends only (wiki, HN, SO, \
+             GitHub, RSS) — not general web search",
+        );
+    }
+    reporter.entry(
+        "api_keys",
+        true,
+        if any_set {
+            "at least one API key set"
+        } else {
+            "no API keys set"
+        },
+    );
 }
 
 fn check_fetch_client(reporter: &CheckReporter) -> bool {
@@ -443,13 +511,16 @@ async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
         Ok(response) => {
             if response.data.is_empty() {
                 reporter.warn("Search returned no results");
+                reporter.entry("connectivity", true, "search ran, 0 results");
             } else {
                 reporter.ok("Search connectivity verified");
+                reporter.entry("connectivity", true, "search verified");
             }
             true
         },
         Err(e) => {
             reporter.fail(&format!("Search test: {e}"));
+            reporter.entry("connectivity", false, &format!("Search test: {e}"));
             false
         },
     }
@@ -547,13 +618,28 @@ fn build_cache_config(no_cache: bool, cache_ttl: u64) -> CacheConfig {
 }
 
 fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
-    let parts: Vec<u8> = host.split('.').filter_map(|s| s.parse().ok()).collect();
-    if parts.len() != 4 {
-        return Err(DaedraError::InvalidArguments(
-            "Invalid host format".to_string(),
-        ));
+    if host.eq_ignore_ascii_case("localhost") {
+        return Ok([127, 0, 0, 1]);
     }
-    Ok([parts[0], parts[1], parts[2], parts[3]])
+    let parts: Vec<u8> = host.split('.').filter_map(|s| s.parse().ok()).collect();
+    if parts.len() == 4 {
+        return Ok([parts[0], parts[1], parts[2], parts[3]]);
+    }
+    // Hostname: resolve it. SSE binds an IPv4 socket, so take the first
+    // resolved A record.
+    let resolved = (host, 0u16)
+        .to_socket_addrs()
+        .map_err(|e| DaedraError::InvalidArguments(format!("cannot resolve host {host:?}: {e}")))?
+        .find(|a| a.is_ipv4());
+    match resolved.and_then(|a| match a.ip() {
+        std::net::IpAddr::V4(v4) => Some(v4.octets()),
+        std::net::IpAddr::V6(_) => None,
+    }) {
+        Some(octets) => Ok(octets),
+        None => Err(DaedraError::InvalidArguments(format!(
+            "cannot resolve host {host:?} to an IPv4 address"
+        ))),
+    }
 }
 
 async fn run_serve(
@@ -755,6 +841,7 @@ async fn run_fetch(
     url: String,
     selector: Option<String>,
     include_images: bool,
+    timeout_secs: u64,
     format: OutputFormat,
     no_color: bool,
 ) -> DaedraResult<()> {
@@ -764,7 +851,15 @@ async fn run_fetch(
         include_images,
     };
 
-    let content = fetch::fetch_page(&args).await?;
+    // Honor the flag by building a client with the requested timeout; the
+    // default path uses the shared client.
+    let content = if timeout_secs == 30 {
+        fetch::fetch_page(&args).await?
+    } else {
+        fetch::FetchClient::with_timeout(Duration::from_secs(timeout_secs))?
+            .fetch(&args)
+            .await?
+    };
 
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&content)?),
@@ -806,7 +901,42 @@ fn teaser(s: &str, n: usize) -> &str {
     }
 }
 
-fn run_info(no_color: bool) {
+/// The four MCP tools, with the same names and descriptions the server
+/// advertises over `tools/list`. `info` must never drift from this.
+const MCP_TOOLS: [(&str, &str); 4] = [
+    (
+        "web_search",
+        "Search the web across all backends with fallback",
+    ),
+    (
+        "search_duckduckgo",
+        "Search via the DuckDuckGo HTML backend",
+    ),
+    ("visit_page", "Fetch and extract webpage content"),
+    ("crawl_site", "Crawl a site via sitemap or link discovery"),
+];
+
+fn run_info(no_color: bool, format: OutputFormat) {
+    if format == OutputFormat::Json || format == OutputFormat::JsonCompact {
+        let info = serde_json::json!({
+            "name": SERVER_NAME,
+            "version": VERSION,
+            "author": "DIRMACS Global Services",
+            "repository": "https://github.com/dirmacs/daedra",
+            "tools": MCP_TOOLS.iter().map(|(name, desc)| serde_json::json!({
+                "name": name,
+                "description": desc,
+            })).collect::<Vec<_>>(),
+            "transports": ["stdio", "sse"],
+        });
+        if format == OutputFormat::Json {
+            println!("{}", serde_json::to_string_pretty(&info).unwrap());
+        } else {
+            println!("{}", serde_json::to_string(&info).unwrap());
+        }
+        return;
+    }
+
     if no_color {
         println!("\nDaedra Server Information");
         println!("{}", "=".repeat(50));
@@ -816,8 +946,9 @@ fn run_info(no_color: bool) {
         println!("  Repository: https://github.com/dirmacs/daedra");
         println!();
         println!("Available Tools:");
-        println!("  - search_duckduckgo: Search the web using DuckDuckGo");
-        println!("  - visit_page: Fetch and extract webpage content");
+        for (name, desc) in MCP_TOOLS {
+            println!("  - {name}: {desc}");
+        }
         println!();
         println!("Supported Transports:");
         println!("  - stdio: Standard I/O for MCP clients");
@@ -832,16 +963,9 @@ fn run_info(no_color: bool) {
         print_info("Repository", "https://github.com/dirmacs/daedra");
 
         print_section("Available Tools");
-        println!(
-            "  {} {}",
-            "search_duckduckgo".green(),
-            "- Search the web using DuckDuckGo".bright_black()
-        );
-        println!(
-            "  {} {}",
-            "visit_page".green(),
-            "- Fetch and extract webpage content".bright_black()
-        );
+        for (name, desc) in MCP_TOOLS {
+            println!("  {} {}", name.green(), format!("- {desc}").bright_black());
+        }
 
         print_section("Supported Transports");
         println!(
@@ -857,7 +981,7 @@ fn run_info(no_color: bool) {
     }
 }
 
-async fn run_check(no_color: bool) -> DaedraResult<()> {
+async fn run_check(no_color: bool, format: OutputFormat) -> DaedraResult<()> {
     let reporter = CheckReporter::new(no_color);
 
     reporter.section("Configuration Check");
@@ -865,8 +989,34 @@ async fn run_check(no_color: bool) -> DaedraResult<()> {
     let mut all_ok = check_search_client(&reporter);
     all_ok &= check_fetch_client(&reporter);
 
+    reporter.section("API Keys");
+    check_api_keys(&reporter);
+
     reporter.section("Connectivity Test");
     all_ok &= check_search_connectivity(&reporter).await;
+
+    reporter.entry(
+        "summary",
+        all_ok,
+        if all_ok {
+            "all checks passed"
+        } else {
+            "checks failed"
+        },
+    );
+
+    if format == OutputFormat::Json || format == OutputFormat::JsonCompact {
+        let report = reporter.to_json(all_ok);
+        if format == OutputFormat::Json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", serde_json::to_string(&report)?);
+        }
+        if !all_ok {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     reporter.summary(all_ok);
     Ok(())
@@ -1013,8 +1163,12 @@ Testing search functionality..."
 
     #[test]
     fn test_parse_host_octets_invalid() {
-        assert!(parse_host_octets("127.0.1").is_err());
-        assert!(parse_host_octets("not-a-host").is_err());
+        assert!(parse_host_octets("not-a-real-host-daedra-invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_host_octets_localhost() {
+        assert_eq!(parse_host_octets("localhost").unwrap(), [127, 0, 0, 1]);
     }
 
     fn sample_page_content() -> PageContent {
