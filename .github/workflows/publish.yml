@@ -40,13 +40,22 @@ jobs:
           # The sparse index lists every published version. `cargo search`
           # shows only the max version, so it reports false for backfilled
           # tags below latest.
-          if curl -sf "https://index.crates.io/da/ed/daedra" | grep -q "\"vers\":\"$VERSION\""; then
-            echo "Version $VERSION already exists on crates.io"
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version $VERSION does not exist on crates.io"
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+          #
+          # Retry for up to two minutes: a release created right after a
+          # manual `cargo publish` races the sparse-index CDN propagation,
+          # and the wrong "not exists" answer makes the publish job die on
+          # "already exists" (the v0.4.0 failure).
+          for i in 1 2 3 4 5 6; do
+            if curl -sf "https://index.crates.io/da/ed/daedra" | grep -q "\"vers\":\"$VERSION\""; then
+              echo "Version $VERSION already exists on crates.io"
+              echo "exists=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "attempt $i: version not visible yet; retrying"
+            sleep 20
+          done
+          echo "Version $VERSION does not exist on crates.io"
+          echo "exists=false" >> $GITHUB_OUTPUT
 
       - name: Run cargo publish --dry-run
         if: steps.check_version.outputs.exists == 'false'
