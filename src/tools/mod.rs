@@ -14,6 +14,7 @@ pub mod crawl;
 pub mod ddg_instant;
 pub mod fetch;
 pub mod github;
+pub mod google;
 pub mod search;
 pub mod serper;
 pub mod stackexchange;

@@ -5,8 +5,8 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
-    SearchResult,
+    region_to_mkt, ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs,
+    SearchResponse, SearchResult,
 };
 use async_trait::async_trait;
 use lazy_static::lazy_static;
@@ -85,17 +85,29 @@ impl BingBackend {
     }
 }
 
+impl Default for BingBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for BingBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
+        let mut query: Vec<(&str, String)> = vec![
+            ("q", args.query.clone()),
+            ("count", opts.num_results.to_string()),
+            ("adlt", opts.safe_search.to_bing_value().to_string()),
+        ];
+        if let Some(mkt) = region_to_mkt(&opts.region) {
+            query.push(("mkt", mkt));
+        }
+
         let resp = self.client
             .get(BING_URL)
-            .query(&[
-                ("q", args.query.as_str()),
-                ("count", &opts.num_results.to_string()),
-            ])
+            .query(&query)
             .send()
             .await
             .map_err(DaedraError::HttpError)?;

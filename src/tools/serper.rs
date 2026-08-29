@@ -5,8 +5,8 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
-    SearchResult,
+    region_to_gl_hl, ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs,
+    SearchResponse, SearchResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -49,10 +49,18 @@ impl SerperBackend {
 impl SearchBackend for SerperBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
-        let body = serde_json::json!({
+        let (gl, hl) = region_to_gl_hl(&opts.region);
+        let mut body = serde_json::json!({
             "q": args.query,
-            "num": opts.num_results
+            "num": opts.num_results,
+            "safeSearch": opts.safe_search.to_serper_value(),
         });
+        if let Some(gl) = gl {
+            body["gl"] = serde_json::Value::String(gl);
+        }
+        if let Some(hl) = hl {
+            body["hl"] = serde_json::Value::String(hl);
+        }
 
         let resp = self.client
             .post(SERPER_URL)

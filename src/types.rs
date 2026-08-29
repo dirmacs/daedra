@@ -89,6 +89,52 @@ impl SafeSearchLevel {
             SafeSearchLevel::Strict => 1,
         }
     }
+
+    /// Convert to Bing's `adlt` query parameter value
+    pub fn to_bing_value(&self) -> &'static str {
+        match self {
+            SafeSearchLevel::Off => "off",
+            SafeSearchLevel::Moderate => "moderate",
+            SafeSearchLevel::Strict => "strict",
+        }
+    }
+
+    /// Convert to Serper's `safeSearch` JSON field value
+    pub fn to_serper_value(&self) -> &'static str {
+        match self {
+            SafeSearchLevel::Off => "off",
+            SafeSearchLevel::Moderate | SafeSearchLevel::Strict => "active",
+        }
+    }
+}
+
+/// Split a DuckDuckGo-style region tag (`"us-en"`, `"wt-wt"`) into an
+/// optional ISO country code (`gl`) and language code (`hl`), as used by
+/// Google and Serper. Worldwide (`"wt-wt"`) yields no `gl`.
+pub fn region_to_gl_hl(region: &str) -> (Option<String>, Option<String>) {
+    let mut parts = region.splitn(2, '-');
+    let geo = parts.next().unwrap_or_default();
+    let lang = parts.next().unwrap_or_default();
+    if geo.is_empty() || geo == "wt" {
+        return (None, None);
+    }
+    (
+        Some(geo.to_lowercase()),
+        if lang.is_empty() {
+            None
+        } else {
+            Some(lang.to_lowercase())
+        },
+    )
+}
+
+/// Build Bing's `mkt` market tag (`"en-US"`) from a DDG-style region tag.
+/// Returns `None` for worldwide or unparseable regions.
+pub fn region_to_mkt(region: &str) -> Option<String> {
+    let (geo, lang) = region_to_gl_hl(region);
+    let lang = lang?;
+    let geo = geo?;
+    Some(format!("{}-{}", lang, geo.to_uppercase()))
 }
 
 impl std::fmt::Display for SafeSearchLevel {
@@ -518,7 +564,7 @@ fn matches_topic_rule(result: &SearchResult, rule: &TopicRule) -> bool {
     let title_match = rule.title_patterns.iter().any(|p| lower_title.contains(p));
     let type_match = rule
         .content_type
-        .map_or(true, |ct| result.metadata.content_type == ct);
+        .is_none_or(|ct| result.metadata.content_type == ct);
     url_match || title_match || type_match
 }
 
