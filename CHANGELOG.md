@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-29
+
+### Fixed
+- Mojeek no longer misreports genuine empty result pages as bot protection. Mojeek marks its empty result lists with a `no-results` class; the backend now treats that as an honest empty response.
+- Mojeek's quiet bot wall now reports its cause. For trusted networks with a non-browser client, Mojeek serves a non-HTML 200 instead of the usual 403. The backend detects the wrong content type and names the bot wall, instead of reporting an unparseable zero-result page.
+- Mojeek requests now carry the full browser navigation header set (Accept, Accept-Language, Sec-Fetch attributes). Mojeek's wall classifies clients; the bare user-agent header alone invited the non-HTML response. Datacenter IPs still receive the plain 403, which stays a fail-fast error.
+
+
 ## [0.5.1] - 2026-08-29
 
 ### Fixed
