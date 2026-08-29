@@ -325,7 +325,7 @@ impl FetchClient {
             })?;
             check_body_size(bytes.len())?;
 
-            classify_fetched_content(&content_type, &bytes).map_err(|e| backoff::Error::permanent(e))
+            classify_fetched_content(&content_type, &bytes).map_err(backoff::Error::permanent)
         })
         .await
     }
@@ -563,7 +563,7 @@ fn has_suspicious_title(document: &Html) -> bool {
     document
         .select(&TITLE_SELECTOR)
         .next()
-        .map_or(false, |el| {
+        .is_some_and(|el| {
             let title = el.text().collect::<String>().to_lowercase();
             SUSPICIOUS_TITLES.iter().any(|s| title.contains(s))
         })
@@ -645,7 +645,7 @@ fn title_from_url(url: &str) -> String {
         .and_then(|parsed| {
             parsed
                 .path_segments()
-                .and_then(|segments| segments.filter(|s| !s.is_empty()).last())
+                .and_then(|segments| segments.rev().find(|s| !s.is_empty()))
                 .map(str::to_string)
         })
         .filter(|name| !name.is_empty())

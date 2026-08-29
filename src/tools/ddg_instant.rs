@@ -95,6 +95,12 @@ fn topic_to_result(topic: &serde_json::Value) -> Option<SearchResult> {
     })
 }
 
+impl Default for DdgInstantBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for DdgInstantBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {

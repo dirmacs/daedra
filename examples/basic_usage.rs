@@ -88,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Word count: {}", content.word_count);
             println!("Fetched at: {}", content.timestamp);
             println!("\nContent preview (first 500 chars):");
-            println!("{}", &content.content.chars().take(500).collect::<String>());
+            println!("{}", content.content.chars().take(500).collect::<String>());
 
             if let Some(links) = &content.links {
                 println!("\nFound {} links", links.len());

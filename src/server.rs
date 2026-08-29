@@ -301,11 +301,10 @@ impl DaedraHandler {
 
         let enrichments = futures::future::join_all(futures).await;
         for enrichment in enrichments.into_iter().flatten() {
-            if let Some(result) = results.iter_mut().find(|r| r.url == enrichment.0) {
-                if result.description.len() < 100 {
+            if let Some(result) = results.iter_mut().find(|r| r.url == enrichment.0)
+                && result.description.len() < 100 {
                     result.description = enrichment.1;
                 }
-            }
         }
     }
 
@@ -461,6 +460,9 @@ impl DaedraHandler {
     }
 }
 
+// `JsonRpcResponse` is the function's only error channel; boxing it here would
+// just move the size to every call site.
+#[allow(clippy::result_large_err)]
 fn parse_tool_call_params(
     params: Option<Value>,
     id: Option<Value>,

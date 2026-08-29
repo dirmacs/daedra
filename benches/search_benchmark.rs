@@ -1,6 +1,6 @@
 //! Benchmarks for Daedra operations
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use daedra::{
     cache::SearchCache,
     types::{ContentType, ResultMetadata, SearchOptions, SearchResponse, SearchResult},
@@ -41,10 +41,10 @@ fn bench_cache_operations(c: &mut Criterion) {
             b.to_async(&runtime).iter(|| async {
                 cache
                     .set_search(
-                        black_box("test query"),
-                        black_box("wt-wt"),
-                        black_box("MODERATE"),
-                        black_box(response.clone()),
+                        std::hint::black_box("test query"),
+                        std::hint::black_box("wt-wt"),
+                        std::hint::black_box("MODERATE"),
+                        std::hint::black_box(response.clone()),
                     )
                     .await;
             });
@@ -63,9 +63,9 @@ fn bench_cache_operations(c: &mut Criterion) {
             b.to_async(&runtime).iter(|| async {
                 cache
                     .get_search(
-                        black_box("test query"),
-                        black_box("wt-wt"),
-                        black_box("MODERATE"),
+                        std::hint::black_box("test query"),
+                        std::hint::black_box("wt-wt"),
+                        std::hint::black_box("MODERATE"),
                     )
                     .await
             });
@@ -85,7 +85,7 @@ fn bench_serialization(c: &mut Criterion) {
             BenchmarkId::new("json_serialize", size),
             &response,
             |b, response| {
-                b.iter(|| serde_json::to_string(black_box(response)).unwrap());
+                b.iter(|| serde_json::to_string(std::hint::black_box(response)).unwrap());
             },
         );
 
@@ -95,7 +95,7 @@ fn bench_serialization(c: &mut Criterion) {
             BenchmarkId::new("json_deserialize", size),
             &json,
             |b, json| {
-                b.iter(|| serde_json::from_str::<SearchResponse>(black_box(json)).unwrap());
+                b.iter(|| serde_json::from_str::<SearchResponse>(std::hint::black_box(json)).unwrap());
             },
         );
     }
@@ -129,9 +129,9 @@ fn bench_response_creation(c: &mut Criterion) {
             |b, (results, options)| {
                 b.iter(|| {
                     SearchResponse::new(
-                        black_box("test query".to_string()),
-                        black_box(results.clone()),
-                        black_box(options),
+                        std::hint::black_box("test query".to_string()),
+                        std::hint::black_box(results.clone()),
+                        std::hint::black_box(options),
                     )
                 });
             },

@@ -32,6 +32,12 @@ impl WikipediaBackend {
     }
 }
 
+impl Default for WikipediaBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for WikipediaBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {

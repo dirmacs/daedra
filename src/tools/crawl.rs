@@ -144,11 +144,10 @@ pub fn parse_sitemap(body: &str) -> Vec<Url> {
             break;
         };
         let loc_text = after_open[..close].trim();
-        if let Ok(parsed) = Url::parse(loc_text) {
-            if !out.iter().any(|existing: &Url| existing == &parsed) {
+        if let Ok(parsed) = Url::parse(loc_text)
+            && !out.iter().any(|existing: &Url| existing == &parsed) {
                 out.push(parsed);
             }
-        }
         rest = &after_open[close + "</loc>".len()..];
         // Silence the unused write-only state — `current`/`in_loc` are
         // reserved for a future switch to a proper SAX pass if sitemaps
@@ -242,7 +241,7 @@ async fn discover_via_anchors(client: &Client, root: &Url, cap: usize) -> Daedra
 }
 
 fn clamp_crawl_args(max_pages: usize, concurrency: usize) -> (usize, usize) {
-    (max_pages.max(1).min(500), concurrency.max(1).min(16))
+    (max_pages.clamp(1, 500), concurrency.clamp(1, 16))
 }
 
 fn rank_urls_by_path_length(urls: &mut [Url]) {
@@ -511,9 +510,8 @@ mod tests {
 
     #[test]
     fn test_is_http_url_no_host() {
-        match Url::parse("http://") {
-            Ok(url) => assert!(!is_http_url(&url)),
-            Err(_) => {} // EmptyHost — unparseable, nothing to classify
+        if let Ok(url) = Url::parse("http://") {
+            assert!(!is_http_url(&url)); // EmptyHost — unparseable, nothing to classify
         }
     }
 
