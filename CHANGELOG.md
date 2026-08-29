@@ -1,74 +1,95 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+This file lists the notable changes to this project.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.9] - 2026-08-29
+
+### Changed
+
+- The minimum supported Rust version is now 1.98 (the toolchain that the rest of the DIRMACS Rust stack uses). The `msrv` CI job checks 1.98.
+- All documentation is now written in ASD-STE100 Simplified Technical English. Code, identifiers, commands, and file paths did not change.
+
+### Fixed
+
+- The README, CONTRIBUTING.md, AGENTS.md, CLAUDE.md, and the site index said "9 backends" or "10 backends". They now say 13. The key-dependency tables now list `pdf-extract` 0.12 and `quick-xml` 0.42.
 
 ## [0.3.8] - 2026-08-29
 
 ### Fixed
-- quick-xml 0.38 → 0.42: clears RUSTSEC-2026-0194 and RUSTSEC-2026-0195 (the 0.38 line shipped in 0.3.7 had two advisories)
+
+- quick-xml 0.38 → 0.42. Version 0.38.4 has two advisories (RUSTSEC-2026-0194 and RUSTSEC-2026-0195). The RSS parser now uses the 0.42 API.
 
 ## [0.3.7] - 2026-08-29
 
 ### Added
-- Three bot-tolerant machine-format backends — same engines, no challenge pages, no keys, verified from datacenter IPs:
-  - **Bing RSS** (`bing-rss`): the regular Bing index via `format=rss`, tried before HTML scraping
-  - **Google News** (`gnews`): Google News RSS feed with region mapping
-  - **Hacker News** (`hn`): the public HN Algolia JSON API, strong for technical queries
-- Fallback chain is now 13 backends; the bot-tolerant tier means most queries succeed even when SERP scraping is blocked
+
+- Three bot-tolerant machine-format backends. They read the RSS and JSON feeds that the engines publish for integrations. No keys. No challenge pages. Tests verified them from datacenter IPs.
+  - **Bing RSS** (`bing-rss`): the regular Bing index via `format=rss`. The chain tries it before HTML scraping.
+  - **Google News** (`gnews`): the Google News RSS feed, with region mapping.
+  - **Hacker News** (`hn`): the public HN Algolia JSON API. Strong for technical queries.
+- The fallback chain now has 13 backends. Most queries succeed even when SERP scraping is blocked.
 
 ## [0.3.6] - 2026-08-29
 
 ### Fixed
-- Scraper backends (Bing, Google, DuckDuckGo) now classify HTTP-200 zero-result anti-bot/consent pages as **soft blocks** (errors) instead of legitimate empty results — aggregate failures now name the real cause
-- Each backend recognizes its own genuine no-results marker (Bing "There are no results for", Google "did not match any documents", DDG "No results") so true no-match queries still report empty
-- Google additionally treats `/sorry/` redirect URLs as CAPTCHA; new `soft_block` module centralizes the classifier
+
+- Scraper backends (Bing, Google, DuckDuckGo) now classify an HTTP 200 page with zero results. The new `soft_block` classifier decides: a genuine no-results page stays an empty result, an anti-bot or consent page becomes an error. Aggregate failures now name the real cause.
+- Each backend knows its own no-results marker. Bing knows "There are no results for". Google knows "did not match any documents". DuckDuckGo knows "No results". A true no-match query still reports empty.
+- Google now treats `/sorry/` redirect URLs as CAPTCHA pages.
 
 ## [0.3.5] - 2026-08-29
 
 ### Fixed
-- Aggregate search-failure errors now distinguish backends that **failed** (with per-backend error detail) from backends that legitimately returned 0 results — the old message conflated the two, hiding rate limits/CAPTCHAs behind a "0 results" claim
+
+- Aggregate failure errors now separate two cases: backends that failed (with the per-backend error) and backends that returned a true empty result. The old message reported both as "0 results" and hid rate limits and CAPTCHAs.
 
 ## [0.3.4] - 2026-08-29
 
 ### Fixed
-- Dependency manifest: pdf-extract 0.12 (patched lopdf ^0.42) so downstream consumers stop resolving the vulnerable lopdf 0.38 train
+
+- The manifest now requires pdf-extract 0.12, which depends on lopdf ^0.42. Consumers no longer resolve the vulnerable lopdf 0.38 line.
 
 ## [0.3.3] - 2026-08-29
 
 ### Added
-- Google HTML search backend (`google`) in the fallback chain after Bing, with CAPTCHA fail-fast (`BotProtectionDetected`) so the next backend takes over (closes #9)
-- SafeSearch is now honored on every backend: Bing (`adlt`), Serper (`safeSearch`), and Google (`safe`); DuckDuckGo already supported `kp`
-- Region mapping for API/scrape backends: Serper/Google receive `gl`/`hl`, Bing receives `mkt` from the DDG-style region tag
+
+- The Google HTML search backend (`google`). It sits after Bing in the chain. On a CAPTCHA it fails fast with `BotProtectionDetected`, so the next backend takes over. Closes #9.
+- Every backend now honors the SafeSearch option. Bing uses `adlt`. Serper uses `safeSearch`. Google uses `safe`. DuckDuckGo already used `kp`.
+- Region mapping for the API and scraper backends. Serper and Google receive `gl` and `hl`. Bing receives `mkt`. The values come from the DDG-style region tag.
 
 ### Fixed
-- All `cargo clippy --all-targets -D warnings` findings (pre-existing drift: collapsible ifs, borrowed boxes, missing `Default` impls, clamp patterns, deprecated `criterion::black_box`)
+
+- All `cargo clippy --all-targets -D warnings` findings. The drift predated this release: collapsible ifs, borrowed boxes, missing `Default` impls, clamp patterns, and the deprecated `criterion::black_box`.
 
 ## [0.1.6] - 2026-02-01
 
 ### Changed
-- Updated `mcp_server` example to demonstrate proper stderr logging for STDIO transport
-- Updated CONTRIBUTING.md with new test file in project structure
+
+- The `mcp_server` example now shows correct stderr logging for the STDIO transport.
+- CONTRIBUTING.md now lists the new test file in the project structure.
 
 ### Documentation
-- Added notes about STDIO transport logging behavior to README
-- Added `--quiet` flag documentation
-- Improved example code with transport-aware logging setup
+
+- The README now documents the STDIO transport logging behavior.
+- The README now documents the `--quiet` flag.
+- The example code shows a transport-aware logging setup.
 
 ## [0.1.5] - 2026-02-01
 
 ### Fixed
-- **stdio transport**: Route all log output to stderr instead of stdout to prevent JSON-RPC stream corruption (#4)
-- **stdio transport**: Suppress decorative banner when using stdio transport
-- **MCP protocol**: Handle `notifications/initialized` method (with prefix) as a no-op instead of returning "Method not found"
+
+- STDIO transport: all log output now goes to stderr, not stdout. This prevents JSON-RPC stream corruption (#4).
+- STDIO transport: the server no longer prints the decorative banner on the STDIO transport.
+- MCP protocol: the server handles `notifications/initialized` (with prefix) as a no-op. It no longer returns "Method not found".
 
 ### Added
-- New `--quiet` / `-q` flag to disable all logging output (useful for stdio transport)
-- Comprehensive stdio transport integration test suite (19 new tests)
+
+- The new `--quiet` / `-q` flag disables all logging output. Useful for the STDIO transport.
+- An integration test suite for the STDIO transport, with 19 new tests:
   - Protocol compliance tests (stdout purity, no ANSI codes, JSON-RPC structure)
   - MCP handshake tests (initialize, initialized, tools/list, ping)
   - Tool execution tests (search_duckduckgo, visit_page)
@@ -77,59 +98,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.4] - 2026-01-21
 
 ### Fixed
-- Replaced html2md with htmd to fix Android/Termux builds (html2md had JNI dependencies that caused build failures on Android)
+
+- html2md → htmd. html2md had JNI dependencies, and those dependencies broke Android/Termux builds.
 
 ## [0.1.3] - 2025-12-15
 
 ### Fixed
-- Fixed publish workflow by bumping version (0.1.2 already existed on crates.io)
+
+- The publish workflow failed because version 0.1.2 already existed on crates.io. The version bump fixed the workflow.
 
 ## [0.1.2] - 2025-12-15
 
 ### Added
-- Initial release of Daedra MCP server
-- Web search using DuckDuckGo
-- Page fetching with content extraction to Markdown
-- STDIO transport for MCP clients
-- SSE (HTTP) transport for web-based clients
-- Built-in response caching with configurable TTL
-- CLI with colored output and multiple output formats
-- Parallel search execution support
-- Comprehensive test suite
-- Benchmark suite for performance testing
-- Docker support
-- GitHub Actions CI/CD workflows
+
+- First release of the Daedra MCP server:
+  - Web search with DuckDuckGo
+  - Page fetching with content extraction to Markdown
+  - STDIO transport for MCP clients
+  - SSE (HTTP) transport for web clients
+  - Response caching with a configurable TTL
+  - CLI with colored output and multiple output formats
+  - Parallel search execution
+  - Test suite
+  - Benchmark suite
+  - Docker support
+  - GitHub Actions CI/CD workflows
 
 ### Tools
-- `search_duckduckgo`: Search the web using DuckDuckGo
-  - Customizable region settings
-  - Safe search filtering (Off/Moderate/Strict)
-  - Configurable result count (1-50)
-  - Time range filtering (day/week/month/year)
+
+- `search_duckduckgo`: search the web with DuckDuckGo.
+  - Region settings
+  - Safe search levels (Off / Moderate / Strict)
+  - Result count from 1 to 50
+  - Time range filter (day / week / month / year)
   - Content type detection
   - Language detection
   - Topic analysis
 
-- `visit_page`: Fetch and extract webpage content
+- `visit_page`: fetch a page and extract its content.
   - HTML to Markdown conversion
-  - CSS selector support for targeted extraction
+  - CSS selector for targeted extraction
   - Bot protection detection
   - Link extraction
-  - Word count analysis
+  - Word count
 
-### CLI Commands
-- `serve`: Start the MCP server (STDIO or SSE)
-- `search`: Perform a direct web search
-- `fetch`: Fetch and display webpage content
-- `info`: Show server information
-- `check`: Validate configuration and connectivity
+### CLI commands
+
+- `serve`: start the MCP server (STDIO or SSE)
+- `search`: run a direct web search
+- `fetch`: fetch and show page content
+- `info`: show server information
+- `check`: test the configuration and the backend connectivity
 
 ## [0.1.0] - 2025-01-XX
 
 ### Added
-- Initial public release
 
-[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.1.6...HEAD
+- First public release.
+
+[Unreleased]: https://github.com/dirmacs/daedra/compare/v0.3.8...HEAD
+[0.3.8]: https://github.com/dirmacs/daedra/compare/v0.3.7...v0.3.8
+[0.3.7]: https://github.com/dirmacs/daedra/compare/v0.3.6...v0.3.7
+[0.3.6]: https://github.com/dirmacs/daedra/compare/v0.3.5...v0.3.6
+[0.3.5]: https://github.com/dirmacs/daedra/compare/v0.3.4...v0.3.5
+[0.3.4]: https://github.com/dirmacs/daedra/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/dirmacs/daedra/compare/v0.1.6...v0.3.3
 [0.1.6]: https://github.com/dirmacs/daedra/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/dirmacs/daedra/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/dirmacs/daedra/compare/v0.1.3...v0.1.4

@@ -15,29 +15,33 @@
 [![CI](https://github.com/dirmacs/daedra/actions/workflows/ci.yml/badge.svg)](https://github.com/dirmacs/daedra/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Daedra** is a self-contained web search [MCP](https://modelcontextprotocol.io/) server written in Rust. Multiple search backends with automatic fallback. Works from any IP — datacenter, VPS, residential. No API keys required for basic search.
+</p>
 
-## Why Daedra?
+Daedra is a self-contained web search [MCP](https://modelcontextprotocol.io/) server in Rust. It gives search and page-fetch tools to AI agents. It works from any IP address: datacenter, VPS, or residential. Basic search needs no API keys.
 
-Every major search engine (Google, Bing, DuckDuckGo, Brave) blocks datacenter/VPS IPs with CAPTCHAs since 2025. Daedra solves this with a **multi-backend fallback chain** that automatically finds a backend that works:
+## Why Daedra
+
+Major search engines block datacenter and VPS IP addresses with CAPTCHAs. Daedra solves this with a multi-backend fallback chain. The chain tries one backend after the next until a backend returns results:
 
 ```
 Serper (API) → Tavily (API) → Bing RSS → Bing → Google News → Hacker News → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
 ```
 
-Pure Rust. If one backend is blocked or rate-limited, the next one takes over automatically. Per-backend **circuit breakers** and **governor** rate limits keep the chain stable under load; transient failures get a **classified retry** (exponential backoff, not a blind fixed delay).
+Three backend groups exist. API backends need a key. Scraper backends read HTML and sometimes meet a CAPTCHA. Machine-format backends read the RSS and JSON feeds that the engines publish for integrations. The machine-format backends work from any IP with no key.
+
+Per-backend circuit breakers and per-backend rate limits keep the chain stable under load. The chain retries only transient errors. Bot protection and rate-limit errors fail fast, so the next backend starts at once.
 
 ## Features
 
-- **13 search backends** with automatic fallback (see table below)
-- **Circuit breaker** (`BackendHealth`) — opens after repeated failures, 30s cooldown
-- **Per-backend keyed rate limiting** via `governor` (API vs knowledge vs scraper tiers)
-- **Classified retry** — only transient errors are retried; bot protection and rate limits fail fast
-- **Readability extraction** — `dom_smoothie` article body extraction for HTML pages
-- **PDF support** — `infer` MIME sniffing + `pdf-extract` text extraction
-- **Content classification** — `FetchedContent` enum (`Html` / `Pdf` / `Binary`) on fetch
-- **URL classification** — `src/url_classification.rs` maps search result URLs to content types
-- **MCP tools** — `web_search`, `visit_page`, `crawl_site` (+ `search_duckduckgo` alias)
+- 13 search backends with automatic fallback (see the table below)
+- Circuit breaker (`BackendHealth`): opens after repeated failures, with a 30 second cooldown
+- Per-backend rate limits via `governor`, with separate quotas for API, knowledge, and scraper backends
+- Classified retry: the chain retries only transient errors
+- Readability extraction: `dom_smoothie` extracts the article body from HTML pages
+- PDF support: `infer` detects the MIME type, `pdf-extract` extracts the text
+- Content classification: `FetchedContent` (`Html` / `Pdf` / `Binary`) on every fetch
+- URL classification: `src/url_classification.rs` maps search result URLs to content types
+- MCP tools: `web_search`, `visit_page`, `crawl_site`, and the `search_duckduckgo` alias
 
 ## Install
 
@@ -63,11 +67,11 @@ cargo install daedra
 | **DDG Instant** | Knowledge graph API | None | **Always** |
 | DuckDuckGo | HTML scraping | None | Rarely (blocked since mid-2025) |
 
-Backends are tried in order. First one that returns results wins.
+The provider tries the backends in order. The first backend that returns results wins.
 
 ## Usage
 
-### MCP Server (for Claude, Cursor, pawan, etc.)
+### MCP server (for Claude, Cursor, pawan, and similar agents)
 
 ```json
 {
@@ -117,7 +121,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## MCP Tools
+## MCP tools
 
 ### `web_search`
 
@@ -135,11 +139,11 @@ Search the web with automatic backend fallback.
 }
 ```
 
-Aliases: `search_duckduckgo` (backward compat)
+`search_duckduckgo` is an alias for `web_search`. It exists for backward compatibility.
 
 ### `visit_page`
 
-Fetch and extract page content as Markdown. HTML pages use **dom_smoothie** Readability extraction; PDFs are detected via **infer** and text is extracted with **pdf-extract**.
+Fetch a page and extract the content as Markdown. HTML pages use `dom_smoothie` Readability extraction. The `infer` crate detects PDFs, and `pdf-extract` extracts the text.
 
 ```json
 {
@@ -151,7 +155,7 @@ Fetch and extract page content as Markdown. HTML pages use **dom_smoothie** Read
 
 ### `crawl_site`
 
-Crawl a site from a root URL (sitemap or link following), returning Markdown per page.
+Crawl a site from a root URL and return Markdown for each page. The crawler reads the sitemap when one exists. Otherwise it follows links.
 
 ## Architecture
 
@@ -159,12 +163,14 @@ Crawl a site from a root URL (sitemap or link following), returning Markdown per
 Daedra
 ├── SearchProvider (fallback chain, circuit breakers, keyed rate limits)
 │   ├── SerperBackend / TavilyBackend (API, optional keys)
-│   ├── BingBackend (HTML scraping)
+│   ├── BingRssBackend / GoogleNewsBackend / HnAlgoliaBackend (machine formats)
+│   ├── BingBackend / GoogleBackend (HTML scraping)
 │   ├── WikipediaBackend / StackExchangeBackend / GitHubBackend
 │   ├── WibyBackend / DdgInstantBackend
 │   └── SearchClient (DuckDuckGo HTML, last resort)
 ├── FetchClient (FetchedContent: Html / Pdf / Binary → Markdown)
 │   ├── dom_smoothie (Readability), infer (MIME), pdf-extract (PDF)
+├── soft_block (classifies zero-result scraper pages: genuine empty or bot block)
 ├── url_classification (search result URL → ContentType)
 ├── SearchCache (moka async cache)
 ├── MCP Server (DaedraHandler: handle_web_search, handle_visit_page, handle_crawl_site)
@@ -178,14 +184,15 @@ Daedra
 | Crate | Role |
 |-------|------|
 | `dom_smoothie` 0.17 | Readability article extraction |
-| `infer` 0.19 | MIME sniffing on fetched bytes |
-| `pdf-extract` 0.10 | PDF text extraction |
+| `infer` 0.19 | MIME detection on fetched bytes |
+| `pdf-extract` 0.12 | PDF text extraction |
+| `quick-xml` 0.42 | RSS parsing for the machine-format backends |
 | `governor` 0.10 | Per-backend keyed rate limiting |
 
 ## Configuration
 
 ```bash
-# Optional API keys (improves result quality)
+# Optional API keys (improve result quality)
 export SERPER_API_KEY=...     # Google results via Serper
 export TAVILY_API_KEY=...     # AI-optimized search
 export GITHUB_TOKEN=...       # Higher GitHub API rate limit
