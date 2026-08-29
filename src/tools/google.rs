@@ -3,7 +3,7 @@
 //! Scrapes Google's HTML search results page. CAPTCHA-prone from
 //! datacenter IPs; the fallback chain treats bot protection as a
 //! fail-fast error so the next backend takes over. Honors the
-//! SafeSearch level and region from [`SearchOptions`].
+//! SafeSearch level and region from [`crate::types::SearchOptions`].
 
 use super::backend::SearchBackend;
 use crate::types::{

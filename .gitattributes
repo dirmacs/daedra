@@ -1,0 +1,2 @@
+tests/fixtures/minimal.pdf -text
+*.pdf binary
