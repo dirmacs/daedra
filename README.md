@@ -5,7 +5,7 @@
 <h1 align="center">Daedra</h1>
 
 <p align="center">
-  Self-contained web search MCP server. Rust. 9 backends. Works from any IP.<br>
+  Self-contained web search MCP server. Rust. 10 backends. Works from any IP.<br>
   Single binary. Automatic backend fallback. Zero configuration for basic search.
 </p>
 
@@ -22,14 +22,14 @@
 Every major search engine (Google, Bing, DuckDuckGo, Brave) blocks datacenter/VPS IPs with CAPTCHAs since 2025. Daedra solves this with a **multi-backend fallback chain** that automatically finds a backend that works:
 
 ```
-Serper (API) → Tavily (API) → Bing → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
+Serper (API) → Tavily (API) → Bing → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
 ```
 
 Pure Rust. If one backend is blocked or rate-limited, the next one takes over automatically. Per-backend **circuit breakers** and **governor** rate limits keep the chain stable under load; transient failures get a **classified retry** (exponential backoff, not a blind fixed delay).
 
 ## Features
 
-- **9 search backends** with automatic fallback (see table below)
+- **10 search backends** with automatic fallback (see table below)
 - **Circuit breaker** (`BackendHealth`) — opens after repeated failures, 30s cooldown
 - **Per-backend keyed rate limiting** via `governor` (API vs knowledge vs scraper tiers)
 - **Classified retry** — only transient errors are retried; bot protection and rate limits fail fast
@@ -52,6 +52,7 @@ cargo install daedra
 | Serper.dev | Google JSON API | `SERPER_API_KEY` | Yes |
 | Tavily | AI-optimized API | `TAVILY_API_KEY` | Yes |
 | Bing | HTML scraping | None | Sometimes (CAPTCHA risk) |
+| **Google** | HTML scraping | None | Rarely (CAPTCHA risk) |
 | **Wikipedia** | OpenSearch API | None | **Always** |
 | **StackExchange** | Public API | None | **Always** |
 | **GitHub** | Public API | None / `GITHUB_TOKEN` | **Always** |

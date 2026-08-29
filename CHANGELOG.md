@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-29
+
+### Added
+- Google HTML search backend (`google`) in the fallback chain after Bing, with CAPTCHA fail-fast (`BotProtectionDetected`) so the next backend takes over (closes #9)
+- SafeSearch is now honored on every backend: Bing (`adlt`), Serper (`safeSearch`), and Google (`safe`); DuckDuckGo already supported `kp`
+- Region mapping for API/scrape backends: Serper/Google receive `gl`/`hl`, Bing receives `mkt` from the DDG-style region tag
+
+### Fixed
+- All `cargo clippy --all-targets -D warnings` findings (pre-existing drift: collapsible ifs, borrowed boxes, missing `Default` impls, clamp patterns, deprecated `criterion::black_box`)
+
 ## [0.1.6] - 2026-02-01
 
 ### Changed

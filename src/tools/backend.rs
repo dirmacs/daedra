@@ -195,24 +195,26 @@ impl SearchProvider {
         let mut backends: Vec<Box<dyn SearchBackend>> = Vec::new();
 
         // Serper (Google results) — if API key is set
-        if let Ok(key) = std::env::var("SERPER_API_KEY") {
-            if !key.is_empty() {
+        if let Ok(key) = std::env::var("SERPER_API_KEY")
+            && !key.is_empty() {
                 info!("Serper backend enabled (SERPER_API_KEY set)");
                 backends.push(Box::new(super::serper::SerperBackend::new(key)));
             }
-        }
 
         // Tavily — if API key is set
-        if let Ok(key) = std::env::var("TAVILY_API_KEY") {
-            if !key.is_empty() {
+        if let Ok(key) = std::env::var("TAVILY_API_KEY")
+            && !key.is_empty() {
                 info!("Tavily backend enabled (TAVILY_API_KEY set)");
                 backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
             }
-        }
 
         // Bing HTML scraping — no API key, but often CAPTCHA-blocked from datacenter IPs
         info!("Bing backend enabled (no API key, may be blocked from datacenter IPs)");
         backends.push(Box::new(super::bing::BingBackend::new()));
+
+        // Google HTML scraping — no API key, but CAPTCHA-prone from datacenter IPs
+        info!("Google backend enabled (no API key, may be blocked from datacenter IPs)");
+        backends.push(Box::new(super::google::GoogleBackend::new()));
 
         // Wikipedia — always works from any IP, knowledge-focused
         info!("Wikipedia backend enabled (always works, knowledge-focused)");
@@ -288,11 +290,10 @@ impl SearchProvider {
         result: DaedraResult<SearchResponse>,
         health: Option<Arc<BackendHealth>>,
     ) -> (String, DaedraResult<SearchResponse>) {
-        if let Ok(r) = &result {
-            if !r.data.is_empty() {
+        if let Ok(r) = &result
+            && !r.data.is_empty() {
                 Self::record_health_outcome(&health, true);
             }
-        }
         (name, result)
     }
 
@@ -366,8 +367,8 @@ impl SearchProvider {
 
         limiters.until_ready(&name, scraper_default).await;
 
-        if let Some(h) = &health {
-            if !h.is_available() {
+        if let Some(h) = &health
+            && !h.is_available() {
                 info!(backend = %name, "Circuit open, skipping");
                 return (
                     name.clone(),
@@ -377,7 +378,6 @@ impl SearchProvider {
                     ))),
                 );
             }
-        }
 
         info!(backend = %name, query = %args.query, "Querying backend");
         let result = b.search(args).await;
@@ -400,13 +400,7 @@ impl SearchProvider {
             Err(_) => Self::handle_unrecoverable_error(name, result, health),
         }
     }
-    /// Aggregate search across ALL available backends.
-    ///
-    /// Queries all backends concurrently, merges results, deduplicates by URL,
-    /// and interleaves sources for diversity (Wikipedia, StackOverflow, GitHub
-    /// results mixed rather than grouped).
-
-    fn collect_queryable_backends(&self) -> Vec<&Box<dyn SearchBackend>> {
+    fn collect_queryable_backends(&self) -> Vec<&dyn SearchBackend> {
         self.backends
             .iter()
             .filter(|b| b.is_available())
@@ -416,12 +410,13 @@ impl SearchProvider {
                     .map(|h| h.is_available())
                     .unwrap_or(true)
             })
+            .map(|b| b.as_ref())
             .collect()
     }
 
     async fn execute_concurrent_queries(
         &self,
-        backends: &[&Box<dyn SearchBackend>],
+        backends: &[&dyn SearchBackend],
         args: &SearchArgs,
     ) -> Vec<(String, DaedraResult<SearchResponse>)> {
         let limiters = Arc::clone(&self.backend_rate_limits);
@@ -433,7 +428,7 @@ impl SearchProvider {
                 let health = self.circuit_breakers.get(b.name()).cloned();
                 let limiters = Arc::clone(&limiters);
                 async move {
-                    Self::query_backend(b.as_ref(), &a, health, &limiters, scraper_default).await
+                    Self::query_backend(*b, &a, health, &limiters, scraper_default).await
                 }
             })
             .collect();
@@ -487,7 +482,7 @@ impl SearchProvider {
     where
         I: Iterator<Item = &'a crate::types::SearchResult>,
     {
-        while let Some(r) = queue.next() {
+        for r in queue.by_ref() {
             if seen.insert(r.url.clone()) {
                 return Some(r.clone());
             }

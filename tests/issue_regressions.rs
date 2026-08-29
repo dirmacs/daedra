@@ -401,7 +401,7 @@ mod issue_8 {
             "issue #8 characterization: PDF wire format should appear in content as opaque text \
              (len={}, preview={:?})",
             page.content.len(),
-            &page.content.chars().take(80).collect::<String>()
+            page.content.chars().take(80).collect::<String>()
         );
     }
 
@@ -457,5 +457,84 @@ mod issue_8 {
         let page = client.fetch(&args).await.expect("live pdf");
         assert!(looks_like_markdown_article(&page.content));
         assert!(page.word_count >= 10);
+    }
+}
+
+// Issue #9 — SafeSearch adjustable on every backend + Google search option.
+// Off must reach the engines, regions must map to engine parameters, and the
+// Google HTML backend must parse SERPs and fail fast on CAPTCHAs.
+mod issue9 {
+    use super::*;
+    use daedra::tools::google::{safe_param, GoogleBackend};
+    use daedra::types::{region_to_gl_hl, region_to_mkt, SafeSearchLevel, SearchOptions};
+
+    #[test]
+    fn issue9_safesearch_mappers_cover_every_level() {
+        assert_eq!(SafeSearchLevel::Off.to_bing_value(), "off");
+        assert_eq!(SafeSearchLevel::Moderate.to_bing_value(), "moderate");
+        assert_eq!(SafeSearchLevel::Strict.to_bing_value(), "strict");
+        assert_eq!(SafeSearchLevel::Off.to_serper_value(), "off");
+        assert_eq!(SafeSearchLevel::Moderate.to_serper_value(), "active");
+        assert_eq!(SafeSearchLevel::Strict.to_serper_value(), "active");
+        assert_eq!(safe_param(SafeSearchLevel::Off), Some("off"));
+        assert_eq!(safe_param(SafeSearchLevel::Moderate), None);
+        assert_eq!(safe_param(SafeSearchLevel::Strict), Some("active"));
+    }
+
+    #[test]
+    fn issue9_region_mapping() {
+        let (gl, hl) = region_to_gl_hl("us-en");
+        assert_eq!(gl.as_deref(), Some("us"));
+        assert_eq!(hl.as_deref(), Some("en"));
+        assert_eq!(region_to_gl_hl("wt-wt"), (None, None));
+        assert_eq!(region_to_mkt("us-en").as_deref(), Some("en-US"));
+        assert_eq!(region_to_mkt("wt-wt"), None);
+    }
+
+    #[test]
+    fn issue9_google_backend_parses_serp() {
+        let backend = GoogleBackend::new();
+        let html = r#"
+            <html><body>
+                <div class="g">
+                    <a href="https://crates.io/crates/divan">divan - crates.io</a>
+                    <div class="VwiC3b">Comfy benchmarking harness.</div>
+                </div>
+                <div class="g">
+                    <a href="/search?q=next">internal link skipped</a>
+                </div>
+            </body></html>
+        "#;
+        let args = SearchArgs {
+            query: "rust benchmark".into(),
+            options: Some(SearchOptions::default()),
+        };
+        let results = backend.parse_results(html, 10);
+        assert_eq!(results.len(), 1, "internal links must be skipped");
+        assert_eq!(results[0].url, "https://crates.io/crates/divan");
+        assert_eq!(results[0].metadata.source, "google");
+        let _ = args; // SearchArgs shape pinned by this destructuring
+    }
+
+    #[tokio::test]
+    async fn issue9_google_captcha_fails_fast() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/search"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(
+                "<html>Our systems have detected unusual traffic from your computer network. g-recaptcha</html>",
+            ))
+            .mount(&server)
+            .await;
+        let backend = GoogleBackend::with_base_url(format!("{}/search", server.uri()));
+        let args = SearchArgs {
+            query: "rust".into(),
+            options: Some(SearchOptions::default()),
+        };
+        let err = backend.search(&args).await.expect_err("CAPTCHA must fail fast");
+        assert!(
+            matches!(err, daedra::types::DaedraError::BotProtectionDetected),
+            "expected BotProtectionDetected, got {err:?}"
+        );
     }
 }
