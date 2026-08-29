@@ -107,17 +107,127 @@ async fn probe_sitemap_candidate(client: &Client, root: &Url, path: &str) -> Opt
     }
 }
 
+/// Minimal robots.txt exclusion rules for the `*` user-agent group.
+/// Everything is allowed when robots.txt is absent or unreadable — the
+/// crawler degrades to its pre-robots behavior rather than failing.
+#[derive(Debug, Default)]
+struct Robots {
+    allow: Vec<String>,
+    disallow: Vec<String>,
+}
+
+impl Robots {
+    fn permissive() -> Self {
+        Self::default()
+    }
+
+    /// Parse the `*` group only. `daedra`-specific groups are rare and the
+    /// wildcard group is the conservative default to honor.
+    fn parse(body: &str) -> Self {
+        let mut robots = Self::default();
+        let mut star_group = false;
+        for raw in body.lines() {
+            let line = raw.split('#').next().unwrap_or("").trim();
+            let Some((key, value)) = line.split_once(':') else {
+                continue;
+            };
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim();
+            match key.as_str() {
+                "user-agent" => star_group = value.eq_ignore_ascii_case("*"),
+                "allow" if star_group => robots.allow.push(value.to_string()),
+                "disallow" if star_group => robots.disallow.push(value.to_string()),
+                _ => {},
+            }
+        }
+        robots
+    }
+
+    /// Longest matching rule wins; `Allow` beats `Disallow` on equal length.
+    fn allows(&self, path_and_query: &str) -> bool {
+        let longest = |rules: &[String]| {
+            rules
+                .iter()
+                .filter(|r| !r.is_empty() && path_and_query.starts_with(r.as_str()))
+                .map(String::len)
+                .max()
+                .unwrap_or(0)
+        };
+        longest(&self.allow) >= longest(&self.disallow)
+    }
+}
+
+/// Fetch `/robots.txt` from the root's origin. Any failure means "no rules".
+async fn fetch_robots(client: &Client, root: &Url) -> Robots {
+    let robots_url = Url::parse(&format!(
+        "{}://{}/robots.txt",
+        root.scheme(),
+        root.host_str().unwrap_or_default()
+    ));
+    let Ok(robots_url) = robots_url else {
+        return Robots::permissive();
+    };
+    match client
+        .get(robots_url)
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.text().await {
+            Ok(body) => Robots::parse(&body),
+            Err(_) => Robots::permissive(),
+        },
+        _ => Robots::permissive(),
+    }
+}
+
 /// Try each well-known sitemap path under `root` and return the first one
 /// that parses to a non-empty URL list. Returns `Ok(None)` if every candidate
 /// is missing, malformed, or empty (fallback to HTML anchor discovery).
 async fn discover_sitemap(client: &Client, root: &Url) -> DaedraResult<Option<Vec<Url>>> {
     for candidate in SITEMAP_CANDIDATES {
         if let Some(urls) = probe_sitemap_candidate(client, root, candidate).await {
-            return Ok(Some(urls));
+            return Ok(Some(expand_sitemap_children(client, urls).await));
         }
     }
 
     Ok(None)
+}
+
+/// True when a discovered sitemap URL is itself a sitemap (an index entry).
+fn is_sitemap_child(url: &Url) -> bool {
+    url.path().ends_with(".xml")
+}
+
+/// Expand one level of sitemap-index children into page URLs. Index files on
+/// large sites reference dozens of nested sitemaps; the 20-child cap keeps
+/// the crawl bounded. Non-XML entries pass through.
+async fn expand_sitemap_children(client: &Client, urls: Vec<Url>) -> Vec<Url> {
+    let any_children = urls.iter().any(is_sitemap_child);
+    if !any_children {
+        return urls;
+    }
+
+    let mut out = Vec::new();
+    let mut children = 0usize;
+    for u in urls {
+        if is_sitemap_child(&u) {
+            if children >= 20 {
+                continue;
+            }
+            children += 1;
+            if let Some(body) = fetch_sitemap_body(client, &u).await {
+                for parsed in parse_sitemap(&body) {
+                    if !out.contains(&parsed) {
+                        out.push(parsed);
+                    }
+                }
+            }
+        } else if !out.contains(&u) {
+            out.push(u);
+        }
+    }
+    out
 }
 
 /// Parse a sitemap XML body into a URL list.
@@ -269,14 +379,16 @@ async fn discover_urls(
     }
 }
 
-/// Spawn semaphore-guarded fetch tasks for each candidate URL.
+/// Spawn semaphore-guarded fetch tasks for each candidate URL. `delay_ms`
+/// staggers fetch starts so small sites are not hit with a burst.
 async fn fetch_candidates_concurrently(
     candidates: Vec<Url>,
     concurrency: usize,
+    delay_ms: u64,
 ) -> Vec<tokio::task::JoinHandle<Option<(String, DaedraResult<PageContent>)>>> {
     let sem = Arc::new(Semaphore::new(concurrency));
     let mut handles = Vec::with_capacity(candidates.len());
-    for url in candidates {
+    for (i, url) in candidates.into_iter().enumerate() {
         let sem = Arc::clone(&sem);
         let args = VisitPageArgs {
             url: url.to_string(),
@@ -285,6 +397,9 @@ async fn fetch_candidates_concurrently(
         };
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire_owned().await.ok()?;
+            if delay_ms > 0 && i > 0 {
+                tokio::time::sleep(Duration::from_millis(delay_ms * i as u64)).await;
+            }
             let result = fetch_page(&args).await;
             Some((args.url, result))
         }));
@@ -348,37 +463,133 @@ pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
         .build()
         .map_err(|e| DaedraError::FetchError(format!("http client build: {}", e)))?;
 
-    let (mut candidates, sitemap_found) = discover_urls(&client, &root, max_pages).await?;
-    rank_urls_by_path_length(&mut candidates);
-    candidates.truncate(max_pages);
+    let robots = if args.ignore_robots {
+        Robots::permissive()
+    } else {
+        fetch_robots(&client, &root).await
+    };
 
-    info!(
-        root = %root,
-        sitemap_found,
-        candidates = candidates.len(),
-        concurrency,
-        "crawl_site starting"
-    );
+    let (mut discovered, sitemap_found) = discover_urls(&client, &root, max_pages).await?;
+    rank_urls_by_path_length(&mut discovered);
 
-    let handles = fetch_candidates_concurrently(candidates, concurrency).await;
-    let (pages, errors) = collect_crawl_results(handles, max_pages).await;
+    // The root page is always fetched, even when discovery already found
+    // candidates — a marketing page that links only off-origin is a crawl
+    // result, not a silent zero.
+    let mut frontier: Vec<Url> = Vec::with_capacity(discovered.len() + 1);
+    frontier.push(root.clone());
+    for u in discovered {
+        if u != root && !frontier.contains(&u) {
+            frontier.push(u);
+        }
+    }
+
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_pages: Vec<CrawledPage> = Vec::new();
+    let mut all_errors: Vec<CrawlError> = Vec::new();
+    let mut budget = max_pages;
+    let mut layer = 0usize;
+    let depth = args.depth.clamp(1, 5);
+
+    while layer < depth && budget > 0 {
+        frontier.retain(|u| {
+            if visited.contains(&u.to_string()) || !is_http_url(u) {
+                return false;
+            }
+            let path_and_query = match u.query() {
+                Some(q) => format!("{}?{}", u.path(), q),
+                None => u.path().to_string(),
+            };
+            robots.allows(&path_and_query)
+        });
+        frontier.truncate(budget);
+        if frontier.is_empty() {
+            break;
+        }
+        let requested: Vec<String> = frontier.iter().map(Url::to_string).collect();
+        for r in &requested {
+            visited.insert(r.clone());
+        }
+        budget -= requested.len().min(budget);
+
+        info!(
+            root = %root,
+            sitemap_found,
+            layer,
+            candidates = requested.len(),
+            concurrency,
+            "crawl_site fetching layer"
+        );
+
+        let handles = fetch_candidates_concurrently(
+            std::mem::take(&mut frontier),
+            concurrency,
+            args.delay_ms,
+        )
+        .await;
+        let (pages, errors) = collect_crawl_results(handles, max_pages).await;
+        all_pages.extend(pages);
+        all_errors.extend(errors);
+
+        layer += 1;
+        if layer < depth {
+            // Next layer: same-origin links from this layer's pages.
+            let mut next: Vec<Url> = Vec::new();
+            for p in &all_pages {
+                for l in &p.links {
+                    if let Ok(lu) = Url::parse(l)
+                        && is_same_origin(&lu, &root)
+                        && !visited.contains(&lu.to_string())
+                        && !next.contains(&lu)
+                    {
+                        next.push(lu);
+                    }
+                }
+            }
+            rank_urls_by_path_length(&mut next);
+            frontier = next;
+        }
+    }
 
     Ok(CrawlResult {
         root_url: root.to_string(),
         sitemap_found,
         summary: CrawlSummary {
             requested: max_pages,
-            fetched: pages.len(),
-            failed: errors.len(),
+            fetched: all_pages.len(),
+            failed: all_errors.len(),
         },
-        pages,
-        errors,
+        pages: all_pages,
+        errors: all_errors,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn robots_parse_star_group_and_longest_match() {
+        let robots = Robots::parse(
+            "User-agent: Googlebot\nDisallow: /all\n\n\
+             User-agent: *\nDisallow: /private\nAllow: /private/public\n\
+             Disallow:\n",
+        );
+        assert!(!robots.allows("/private/secret"));
+        assert!(robots.allows("/private/public/doc"));
+        assert!(robots.allows("/open"));
+    }
+
+    #[test]
+    fn robots_empty_or_missing_is_permissive() {
+        assert!(Robots::permissive().allows("/anything"));
+        assert!(Robots::parse("").allows("/anything"));
+    }
+
+    #[test]
+    fn robots_comments_and_case_insensitive_keys() {
+        let robots = Robots::parse("# note\nUser-agent: *\nDisallow: /cgi-bin # legacy\n");
+        assert!(!robots.allows("/cgi-bin/old"));
+    }
 
     #[test]
     fn parse_sitemap_handles_urlset() {

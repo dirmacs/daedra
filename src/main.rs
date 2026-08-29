@@ -145,6 +145,18 @@ enum Commands {
         /// Maximum concurrent fetches
         #[arg(short, long, default_value = "4")]
         concurrency: usize,
+
+        /// Link layers to follow past discovery (1 = discovered pages only, max 5)
+        #[arg(short = 'd', long, default_value = "1")]
+        depth: usize,
+
+        /// Delay between page fetch starts in milliseconds
+        #[arg(long, default_value = "0")]
+        delay_ms: u64,
+
+        /// Ignore robots.txt exclusions for this crawl
+        #[arg(long)]
+        ignore_robots: bool,
     },
 
     /// Show server information
@@ -286,7 +298,24 @@ impl Commands {
                 url,
                 max_pages,
                 concurrency,
-            } => run_crawl(url, max_pages, concurrency, format, no_color).await,
+                depth,
+                delay_ms,
+                ignore_robots,
+            } => {
+                run_crawl(
+                    CrawlArgs {
+                        root_url: url,
+                        max_pages,
+                        concurrency,
+                        depth,
+                        delay_ms,
+                        ignore_robots,
+                    },
+                    format,
+                    no_color,
+                )
+                .await
+            },
 
             Commands::Info => {
                 run_info(no_color);
@@ -673,7 +702,7 @@ fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
         );
         for page in &result.pages {
             println!("\n--- {} ---", page.url);
-            println!("{}", &page.markdown[..page.markdown.len().min(200)]);
+            println!("{}", teaser(&page.markdown, 200));
         }
     } else {
         print_section(&format!(
@@ -684,7 +713,7 @@ fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
         for page in &result.pages {
             println!("\n{} {}", "→".bright_black(), page.url.bright_blue());
             println!("  {}", page.title.white().bold());
-            println!("  {}...", &page.markdown[..page.markdown.len().min(150)]);
+            println!("  {}...", teaser(&page.markdown, 150));
         }
     }
 }
@@ -746,19 +775,7 @@ async fn run_fetch(
     Ok(())
 }
 
-async fn run_crawl(
-    url: String,
-    max_pages: usize,
-    concurrency: usize,
-    format: OutputFormat,
-    no_color: bool,
-) -> DaedraResult<()> {
-    let args = CrawlArgs {
-        root_url: url,
-        max_pages,
-        concurrency,
-    };
-
+async fn run_crawl(args: CrawlArgs, format: OutputFormat, no_color: bool) -> DaedraResult<()> {
     let result = crawl_site(args).await?;
 
     match format {
@@ -767,7 +784,26 @@ async fn run_crawl(
         OutputFormat::Pretty => print_crawl_result_pretty(&result, no_color),
     }
 
+    // A silent empty success is the worst crawl failure mode: the summary
+    // printed above says zero, and the exit code must agree.
+    if result.summary.fetched == 0 {
+        return Err(DaedraError::FetchError(
+            "crawl fetched 0 pages (see summary above); the site may block crawlers \
+             or serve no sitemap and same-origin links"
+                .to_string(),
+        ));
+    }
+
     Ok(())
+}
+
+/// Char-boundary-safe teaser: first `n` characters of `s`, never splitting
+/// a multi-byte character.
+fn teaser(s: &str, n: usize) -> &str {
+    match s.char_indices().nth(n) {
+        Some((i, _)) => &s[..i],
+        None => s,
+    }
 }
 
 fn run_info(no_color: bool) {
@@ -871,6 +907,17 @@ async fn main() {
 mod tests {
     use super::*;
     use daedra::types::{ContentType, PageLink, ResultMetadata};
+
+    #[test]
+    fn test_teaser_is_char_boundary_safe() {
+        // "héllo" — byte 2 would split the é (2 bytes). 150-byte slicing
+        // panicked on such pages; teaser must not.
+        let s = "héllo wörld — ünïcode téxt";
+        let t = teaser(s, 3);
+        assert!(s.starts_with(t));
+        assert_eq!(t, "hél");
+        assert_eq!(teaser("short", 150), "short");
+    }
 
     #[test]
     fn test_should_print_banner_verbose_sse() {

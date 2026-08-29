@@ -442,6 +442,18 @@ pub struct CrawlArgs {
     /// Maximum number of concurrent fetches
     #[serde(default = "default_crawl_concurrency")]
     pub concurrency: usize,
+
+    /// Link layers to follow past discovery (1 = discovered pages only, 5 max)
+    #[serde(default = "default_crawl_depth")]
+    pub depth: usize,
+
+    /// Delay between page fetch starts in milliseconds (politeness for small sites)
+    #[serde(default)]
+    pub delay_ms: u64,
+
+    /// Ignore robots.txt exclusions for this crawl
+    #[serde(default)]
+    pub ignore_robots: bool,
 }
 
 fn default_crawl_max_pages() -> usize {
@@ -449,6 +461,9 @@ fn default_crawl_max_pages() -> usize {
 }
 fn default_crawl_concurrency() -> usize {
     4
+}
+fn default_crawl_depth() -> usize {
+    1
 }
 
 /// A single page fetched by `crawl_site`.
@@ -693,6 +708,21 @@ pub fn crawl_args_schema() -> serde_json::Value {
                 "type": "integer",
                 "description": "Maximum concurrent fetches (default: 4)",
                 "default": 4
+            },
+            "depth": {
+                "type": "integer",
+                "description": "Link layers to follow past discovery (1 = discovered pages only, max 5)",
+                "default": 1
+            },
+            "delay_ms": {
+                "type": "integer",
+                "description": "Delay between page fetch starts in milliseconds (politeness)",
+                "default": 0
+            },
+            "ignore_robots": {
+                "type": "boolean",
+                "description": "Ignore robots.txt exclusions for this crawl",
+                "default": false
             }
         },
         "required": ["root_url"]

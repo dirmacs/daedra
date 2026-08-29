@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.13] - 2026-08-29
+
+### Fixed
+- `crawl` always fetches the root page, even when sitemap or anchor discovery found candidates. A page that links only off-origin now yields a crawl result instead of a silent `0 pages` success.
+- `crawl` exits non-zero when it fetched zero pages. The summary still prints first.
+- Sitemap indexes (nested `.xml` sitemaps) expand one level during discovery, capped at 20 children.
+- The pretty crawl teaser slices by character, not byte, so multi-byte pages can no longer panic.
+
+### Added
+- `crawl --depth N` follows same-origin links from fetched pages, up to 5 layers.
+- `crawl --delay-ms N` staggers fetch starts (politeness for small sites).
+- `robots.txt` is fetched and honored (longest-match rule, `Allow` beats `Disallow`, `*` group). Crawl fails open when robots.txt is absent. `--ignore-robots` opts out. Same fields on the MCP `crawl_site` tool.
+
+## [0.3.12] - 2026-08-29
+
 ## [0.3.12] - 2026-08-29
 
 ### Changed
