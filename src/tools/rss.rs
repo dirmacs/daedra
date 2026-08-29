@@ -72,7 +72,7 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
         let event = reader.read_event();
         match &event {
             Ok(Event::Start(e)) => {
-                let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+                let name = e.local_name().into_inner().to_string();
                 if name == "item" {
                     in_item = true;
                     buf_title.clear();
@@ -83,7 +83,11 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
                 }
             },
             Ok(Event::Text(t)) if in_item && !current_tag.is_empty() => {
-                let text = t.xml_content().unwrap_or_default();
+                let text = quick_xml::escape::unescape_with(
+                    t,
+                    quick_xml::escape::resolve_predefined_entity,
+                )
+                .unwrap_or_default();
                 match current_tag.as_str() {
                     "title" => buf_title.push_str(&text),
                     "link" => buf_link.push_str(&text),
@@ -92,7 +96,7 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
                 }
             },
             Ok(Event::CData(c)) if in_item && !current_tag.is_empty() => {
-                let text = String::from_utf8_lossy(c.as_ref()).to_string();
+                let text = c.to_string();
                 match current_tag.as_str() {
                     "title" => buf_title.push_str(&text),
                     "link" => buf_link.push_str(&text),
@@ -101,10 +105,9 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
                 }
             },
             Ok(Event::GeneralRef(r)) if in_item && !current_tag.is_empty() => {
-                let name = String::from_utf8_lossy(r).to_string(); // Deref<[u8]>: the ref name, e.g. "amp"
-                let text = quick_xml::escape::resolve_predefined_entity(&name)
+                let text = quick_xml::escape::resolve_predefined_entity(r)
                     .map(str::to_string)
-                    .unwrap_or_else(|| format!("&{name};"));
+                    .unwrap_or_else(|| format!("&{};", r.as_ref()));
                 match current_tag.as_str() {
                     "title" => buf_title.push_str(&text),
                     "link" => buf_link.push_str(&text),
@@ -113,7 +116,7 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
                 }
             },
             Ok(Event::End(e)) => {
-                let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+                let name = e.local_name().into_inner().to_string();
                 if name == "item" && in_item {
                     in_item = false;
                     if !buf_link.is_empty() {

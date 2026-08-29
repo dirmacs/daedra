@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.3.7"
+version = "0.3.8"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP."
@@ -35,7 +35,7 @@ html5ever = "0.36.1"
 # URL parsing
 url = "2.5.7"
 urlencoding = "2.1.3"
-quick-xml = "0.38"
+quick-xml = "0.42"
 
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }

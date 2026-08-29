@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-08-29
+
+### Fixed
+- quick-xml 0.38 → 0.42: clears RUSTSEC-2026-0194 and RUSTSEC-2026-0195 (the 0.38 line shipped in 0.3.7 had two advisories)
+
 ## [0.3.7] - 2026-08-29
 
 ### Added
