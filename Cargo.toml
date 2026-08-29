@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP."
@@ -79,7 +79,7 @@ dom_smoothie = "0.17"
 
 # MIME sniffing and PDF text extraction
 infer = "0.19"
-pdf-extract = "0.12"
+pdf-inspector = "1.17"
 
 # HTTP server for SSE transport
 axum = { version = "0.8.7", features = ["macros"] }
@@ -92,7 +92,9 @@ governor = "0.10.2"
 # Retry logic
 html-escape = "0.2.13"
 clap_complete = "4"
+crawlberg = { version = "1.4", optional = true }
 toml = "0.9"
+anydoc = "0.2"
 
 [dev-dependencies]
 tokio-test = "0.4.4"
@@ -110,6 +112,9 @@ harness = false
 default = ["stdio", "sse"]
 stdio = []
 sse = []
+# Opt-in crawl engine. Default builds stay lean; the native crawler covers
+# sitemap, robots, depth, and delay on its own.
+crawlberg = ["dep:crawlberg"]
 
 [profile.release]
 opt-level = 3

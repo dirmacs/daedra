@@ -1,6 +1,6 @@
 +++
 title = "Daedra"
-description = "Self-contained web search MCP server. 16 backends, Readability extraction, PDF support, circuit breakers."
+description = "Self-contained web search MCP server. 16 backends, Readability extraction, PDF and Office document support, circuit breakers."
 template = "index.html"
 +++
 

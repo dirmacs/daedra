@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-29
+
+### Added
+- Office and ebook document fetching: docx, doc, odt, rtf, epub, ppt/pptx, xlsx, ods, and csv convert to Markdown via `anydoc`. Zip containers served as `application/zip` or `octet-stream` are sniffed from the archive contents, so mislabeled files still extract; an ordinary zip stays a binary.
+- The optional `crawlberg` crawl engine behind the `crawlberg` cargo feature: `daedra crawl --engine crawlberg`. Default builds stay lean; the native crawler is unchanged. crawlberg's SSRF guard denies private networks; crawl local hosts with its own `CRAWLBERG_ALLOW_PRIVATE_NETWORK` override.
+
+### Changed
+- PDF extraction moved from `pdf-extract` to `pdf-inspector` (MIT, zero dependencies). Output is Markdown with inline emphasis, and scanned pages are reported as needing OCR instead of silently producing junk. The "Attention Is All You Need" arXiv benchmark: 5951 words, up from 5858 plain-text.
+
+
 ## [0.4.0] - 2026-08-29
 
 ### Added

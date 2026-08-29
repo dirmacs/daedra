@@ -449,6 +449,75 @@ async fn collect_crawl_results(
 /// semaphore, converts each to markdown via the existing `visit_page`
 /// pipeline, and returns a structured result with per-URL success/error
 /// buckets.
+/// Crawl a site with the optional `crawlberg` engine (enable the
+/// `crawlberg` cargo feature). The engine handles discovery, robots, and
+/// budgets internally; pages come back as Markdown through the same
+/// extraction path the native crawler uses.
+#[cfg(feature = "crawlberg")]
+pub async fn crawl_site_with_crawlberg(args: CrawlArgs) -> DaedraResult<CrawlResult> {
+    let root = Url::parse(&args.root_url)
+        .map_err(|e| DaedraError::InvalidArguments(format!("invalid root_url: {e}")))?;
+    let (max_pages, _concurrency) = clamp_crawl_args(args.max_pages, args.concurrency);
+    let depth = args.depth.clamp(1, 5);
+
+    let config = crawlberg::CrawlConfig::builder()
+        .max_pages(max_pages)
+        .max_depth(depth - 1)
+        .build();
+    let engine = crawlberg::CrawlEngine::builder()
+        .config(config)
+        .build()
+        .map_err(|e| DaedraError::FetchError(format!("crawlberg engine: {e}")))?;
+
+    let result = engine
+        .crawl(&args.root_url)
+        .await
+        .map_err(|e| DaedraError::FetchError(format!("crawlberg crawl: {e}")))?;
+
+    let mut pages = Vec::new();
+    let mut errors = Vec::new();
+    for page in result.pages {
+        if page.status_code >= 400 || page.html.trim().is_empty() {
+            errors.push(crate::types::CrawlError {
+                url: page.url.clone(),
+                error: format!("HTTP {}", page.status_code),
+            });
+            continue;
+        }
+        match super::fetch::html_to_page_content(&page.html, &page.url, false) {
+            Ok(content) => pages.push(CrawledPage {
+                url: content.url,
+                title: content.title,
+                markdown: content.content,
+                links: content
+                    .links
+                    .map(|l| l.into_iter().map(|p| p.url).collect())
+                    .unwrap_or_default(),
+            }),
+            Err(e) => errors.push(crate::types::CrawlError {
+                url: page.url.clone(),
+                error: e.to_string(),
+            }),
+        }
+    }
+
+    let fetched = pages.len();
+    Ok(CrawlResult {
+        root_url: root.to_string(),
+        sitemap_found: false,
+        summary: crate::types::CrawlSummary {
+            requested: max_pages,
+            fetched,
+            failed: errors.len(),
+        },
+        pages,
+        errors,
+    })
+}
+
+/// Crawl a site with the native engine: sitemap or same-origin anchor
+/// discovery, robots.txt, depth layers, and per-page extraction through the
+/// visit_page pipeline.
 pub async fn crawl_site(args: CrawlArgs) -> DaedraResult<CrawlResult> {
     let root = Url::parse(&args.root_url)
         .map_err(|e| DaedraError::InvalidArguments(format!("invalid root_url: {}", e)))?;

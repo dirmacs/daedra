@@ -28,6 +28,8 @@ pub mod wiby;
 pub mod wikipedia;
 
 pub use backend::*;
+#[cfg(feature = "crawlberg")]
+pub use crawl::crawl_site_with_crawlberg;
 pub use crawl::{crawl_site, parse_sitemap};
 pub use fetch::*;
 pub use search::*;

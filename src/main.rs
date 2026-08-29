@@ -4,6 +4,8 @@
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
+#[cfg(feature = "crawlberg")]
+use daedra::tools::crawl_site_with_crawlberg;
 use daedra::{
     DaedraResult, SERVER_NAME, VERSION,
     cache::CacheConfig,
@@ -181,6 +183,11 @@ enum Commands {
         /// Ignore robots.txt exclusions for this crawl
         #[arg(long)]
         ignore_robots: bool,
+
+        /// Crawl engine: native (default) or crawlberg (needs the
+        /// crawlberg cargo feature)
+        #[arg(long, value_enum, default_value = "native")]
+        engine: CrawlEngineOption,
     },
 
     /// Show server information
@@ -188,6 +195,16 @@ enum Commands {
 
     /// Validate configuration and dependencies
     Check,
+}
+
+/// Crawl engine choices
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum CrawlEngineOption {
+    /// Built-in crawler (sitemap, robots, depth layers)
+    #[default]
+    Native,
+    /// crawlberg engine (requires the crawlberg cargo feature)
+    Crawlberg,
 }
 
 /// Transport options for the serve command
@@ -366,6 +383,7 @@ impl Commands {
                 depth,
                 delay_ms,
                 ignore_robots,
+                engine,
             } => {
                 run_crawl(
                     CrawlArgs {
@@ -376,6 +394,7 @@ impl Commands {
                         delay_ms,
                         ignore_robots,
                     },
+                    engine,
                     format,
                     no_color,
                 )
@@ -1004,8 +1023,30 @@ fn print_page(
     Ok(())
 }
 
-async fn run_crawl(args: CrawlArgs, format: OutputFormat, no_color: bool) -> DaedraResult<()> {
-    let result = crawl_site(args).await?;
+async fn run_crawl(
+    args: CrawlArgs,
+    engine: CrawlEngineOption,
+    format: OutputFormat,
+    no_color: bool,
+) -> DaedraResult<()> {
+    let result = match engine {
+        CrawlEngineOption::Native => crawl_site(args).await?,
+        CrawlEngineOption::Crawlberg => {
+            #[cfg(feature = "crawlberg")]
+            {
+                crawl_site_with_crawlberg(args).await?
+            }
+            #[cfg(not(feature = "crawlberg"))]
+            {
+                let _ = args;
+                return Err(DaedraError::InvalidArguments(
+                    "this binary was built without the crawlberg feature; rebuild with \
+                     --features crawlberg"
+                        .to_string(),
+                ));
+            }
+        },
+    };
 
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&result)?),
