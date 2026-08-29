@@ -155,9 +155,10 @@ impl SearchBackend for GoogleBackend {
             )));
         }
 
+        let resp_url_is_sorry = resp.url().as_str().contains("/sorry/");
         let html = resp.text().await.map_err(DaedraError::HttpError)?;
 
-        if html.contains("unusual traffic") || html.contains("g-recaptcha") {
+        if resp_url_is_sorry || html.contains("unusual traffic") || html.contains("g-recaptcha") {
             warn!("Google served a CAPTCHA page");
             return Err(DaedraError::BotProtectionDetected);
         }
@@ -165,7 +166,30 @@ impl SearchBackend for GoogleBackend {
         let results = self.parse_results(&html, opts.num_results);
 
         if results.is_empty() {
-            warn!("Google returned 0 results — may be blocked or CAPTCHA");
+            match super::soft_block::classify(
+                &html,
+                &["did not match any documents", "no results found"],
+            ) {
+                super::soft_block::EmptyPage::GenuineNoResults => {
+                    info!("Google genuinely reports no results for this query");
+                },
+                super::soft_block::EmptyPage::SoftBlock => {
+                    let marker = super::soft_block::matched_block_marker(
+                        &html,
+                        &[
+                            "unusual traffic",
+                            "g-recaptcha",
+                            "consent.google.com",
+                            "before you continue",
+                            "enable javascript",
+                            "unsupported browser",
+                            "/sorry/",
+                        ],
+                    );
+                    warn!(marker = ?marker, "Google zero-result page classified as soft block");
+                    return Err(super::soft_block::soft_block_error("Google", marker));
+                },
+            }
         }
 
         info!(

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-08-29
+
+### Fixed
+- Scraper backends (Bing, Google, DuckDuckGo) now classify HTTP-200 zero-result anti-bot/consent pages as **soft blocks** (errors) instead of legitimate empty results — aggregate failures now name the real cause
+- Each backend recognizes its own genuine no-results marker (Bing "There are no results for", Google "did not match any documents", DDG "No results") so true no-match queries still report empty
+- Google additionally treats `/sorry/` redirect URLs as CAPTCHA; new `soft_block` module centralizes the classifier
+
 ## [0.3.5] - 2026-08-29
 
 ### Fixed

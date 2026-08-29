@@ -83,8 +83,35 @@ impl SearchClient {
         // Execute search with retry
         let html = self.execute_search_with_retry(&params).await?;
 
-        // Parse results
+        // Parse results — a zero-result page is classified before it is
+        // reported as empty: DDG anomaly/challenge pages are soft blocks,
+        // not genuine no-match responses.
         let results = self.parse_search_results(&html, options.num_results)?;
+
+        if results.is_empty() {
+            if let Some(marker) = super::soft_block::matched_block_marker(
+                &html,
+                &[
+                    "anomaly",
+                    "challenge",
+                    "captcha",
+                    "unfortunately, our systems",
+                ],
+            ) {
+                warn!(marker, "DuckDuckGo served an anti-bot page");
+                return Err(DaedraError::BotProtectionDetected);
+            }
+            match super::soft_block::classify(&html, &["no results", "no_results", "couldn't find"])
+            {
+                super::soft_block::EmptyPage::GenuineNoResults => {
+                    info!("DuckDuckGo genuinely reports no results for this query");
+                },
+                super::soft_block::EmptyPage::SoftBlock => {
+                    warn!("DuckDuckGo zero-result page classified as soft block");
+                    return Err(super::soft_block::soft_block_error("DuckDuckGo", None));
+                },
+            }
+        }
 
         info!(
             query = %args.query,
