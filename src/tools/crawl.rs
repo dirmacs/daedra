@@ -6,7 +6,7 @@
 //!    and extracts the URL list. Falls back to anchor discovery from the
 //!    root page when no sitemap exists.
 //! 2. **Bounded concurrent fetch** — pulls a batch of URLs through the
-//!    existing [`fetch::visit_page`] pipeline, respecting a user-supplied
+//!    existing FetchClient extraction pipeline, respecting a user-supplied
 //!    concurrency cap via [`tokio::sync::Semaphore`].
 //!
 //! LLM-based URL ranking is deliberately **not** part of this module. The
