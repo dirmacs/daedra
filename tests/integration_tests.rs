@@ -18,6 +18,8 @@ mod search_tests {
                 region: "wt-wt".to_string(),
                 safe_search: SafeSearchLevel::Moderate,
                 time_range: None,
+                backends: None,
+                exclude_backends: None,
             }),
         };
 
@@ -53,6 +55,8 @@ mod search_tests {
                 region: "us-en".to_string(),
                 safe_search: SafeSearchLevel::Strict,
                 time_range: None,
+                backends: None,
+                exclude_backends: None,
             }),
         };
 

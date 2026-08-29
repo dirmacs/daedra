@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-08-29
+
+### Changed
+- Search results are ranked by relevance to the query before merging. Results that share no query token land after every matched result; a full-phrase title match outranks a word-bag match. When no result matches the query at all, the unrelated feed noise is discarded and the search reports it instead of returning it.
+- Google News descriptions are stripped of embedded HTML markup and `nbsp` entities.
+
+### Added
+- `--backend` and `--exclude` flags on `search` (plus `backends` and `exclude_backends` in `SearchOptions`) to select or skip backends.
+- `--time-range` now filters results on the backends that support it: Serper, Tavily, Hacker News (numeric date filter), and Google News (`when:` operator). Backends without recency support ignore it; invalid letters are rejected.
+
+### Fixed
+- `-v`, `-q`, and `RUST_LOG` now apply to every command, not only `serve`. All non-serve output logs to stderr, so JSON output stays clean.
+- Empty queries and `--num-results 0` are rejected with a clear error, matching the MCP schema.
+
+## [0.3.11] - 2026-08-29
+
 ## [0.3.11] - 2026-08-29
 
 ### Fixed

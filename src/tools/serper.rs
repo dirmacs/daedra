@@ -61,6 +61,18 @@ impl SearchBackend for SerperBackend {
         if let Some(hl) = hl {
             body["hl"] = serde_json::Value::String(hl);
         }
+        if let Some(tr) = &opts.time_range {
+            // Serper speaks Google's `tbs` recency codes.
+            if let Some(tbs) = match tr.as_str() {
+                "d" => Some("qdr:d"),
+                "w" => Some("qdr:w"),
+                "m" => Some("qdr:m"),
+                "y" => Some("qdr:y"),
+                _ => None,
+            } {
+                body["tbs"] = serde_json::Value::String(tbs.to_string());
+            }
+        }
 
         let resp = self
             .client

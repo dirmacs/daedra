@@ -109,6 +109,14 @@ enum Commands {
         /// Time range filter (d=day, w=week, m=month, y=year)
         #[arg(short = 't', long)]
         time_range: Option<String>,
+
+        /// Only use these backends (repeat for several; names from `daedra check`)
+        #[arg(long = "backend")]
+        backends: Vec<String>,
+
+        /// Skip these backends (repeat for several)
+        #[arg(long = "exclude")]
+        exclude_backends: Vec<String>,
     },
 
     /// Fetch and extract content from a web page
@@ -254,17 +262,18 @@ impl Commands {
                 region,
                 safe_search,
                 time_range,
+                backends,
+                exclude_backends,
             } => {
-                run_search(
-                    query,
-                    num_results,
+                let opts = SearchOptions {
                     region,
-                    safe_search,
+                    safe_search: safe_search.into(),
+                    num_results,
                     time_range,
-                    format,
-                    no_color,
-                )
-                .await
+                    backends: (!backends.is_empty()).then_some(backends),
+                    exclude_backends: (!exclude_backends.is_empty()).then_some(exclude_backends),
+                };
+                run_search(query, opts, format, no_color).await
             },
 
             Commands::Fetch {
@@ -682,21 +691,13 @@ fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
 
 async fn run_search(
     query: String,
-    num_results: usize,
-    region: String,
-    safe_search: SafeSearchOption,
-    time_range: Option<String>,
+    opts: SearchOptions,
     format: OutputFormat,
     no_color: bool,
 ) -> DaedraResult<()> {
     let args = SearchArgs {
         query: query.clone(),
-        options: Some(SearchOptions {
-            region,
-            safe_search: safe_search.into(),
-            num_results,
-            time_range,
-        }),
+        options: Some(opts),
     };
 
     let provider = daedra::tools::SearchProvider::auto();
@@ -843,10 +844,13 @@ async fn main() {
         colored::control::set_override(false);
     }
 
-    if let Commands::Serve { transport, .. } = &cli.command {
-        let use_stderr = matches!(transport, TransportOption::Stdio);
-        setup_logging(cli.verbose, use_stderr, cli.quiet);
-    }
+    // Every command logs to stderr; only serve-sse writes elsewhere and only
+    // stdio serve must keep stdout pristine for the JSON-RPC stream.
+    let use_stderr = match &cli.command {
+        Commands::Serve { transport, .. } => matches!(transport, TransportOption::Stdio),
+        _ => true,
+    };
+    setup_logging(cli.verbose, use_stderr, cli.quiet);
 
     let result = cli
         .command
@@ -1053,10 +1057,30 @@ Testing search functionality..."
             region: "wt-wt".to_string(),
             safe_search: SafeSearchOption::default(),
             time_range: None,
+            backends: Vec::new(),
+            exclude_backends: Vec::new(),
         }
         .run(OutputFormat::Pretty, false, true, true)
         .await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_search_options_cli_mapping() {
+        let backends = vec!["hn".to_string()];
+        let opts = SearchOptions {
+            region: "wt-wt".to_string(),
+            safe_search: SafeSearchLevel::Moderate,
+            num_results: 10,
+            time_range: None,
+            backends: (!backends.is_empty()).then_some(backends),
+            exclude_backends: None,
+        };
+        assert_eq!(
+            opts.backends.as_deref(),
+            Some(["hn".to_string()].as_slice())
+        );
+        assert!(opts.exclude_backends.is_none());
     }
 
     #[tokio::test]

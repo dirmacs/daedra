@@ -507,6 +507,7 @@ mod tests {
             safe_search: crate::types::SafeSearchLevel::Strict,
             num_results: 10,
             time_range: Some("w".to_string()),
+            ..Default::default()
         };
 
         let params = client.build_search_params("test query", &options);

@@ -135,12 +135,48 @@ fn parse_rss_items(xml: &str) -> Vec<(String, String, String)> {
 }
 
 fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&")
+    s.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&apos;", "'")
+}
+
+/// Remove markup tags and collapse whitespace. Google News embeds raw HTML
+/// (`<a href=...><font ...>`) in its RSS descriptions; agents should never
+/// see it.
+fn strip_markup(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {},
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Google News recency operator for a cutoff in seconds (`1h`, `1d`, `7d`,
+/// `1m`, `1y`). Scales up to the smallest operator that covers the window.
+fn humanize_when(secs: u64) -> String {
+    const HOUR: u64 = 60 * 60;
+    const DAY: u64 = 24 * HOUR;
+    if secs <= HOUR {
+        "1h".to_string()
+    } else if secs <= DAY {
+        "1d".to_string()
+    } else if secs <= 7 * DAY {
+        "7d".to_string()
+    } else if secs <= 30 * DAY {
+        "1m".to_string()
+    } else {
+        "1y".to_string()
+    }
 }
 
 fn build_rss_response(
@@ -154,9 +190,9 @@ fn build_rss_response(
         .take(opts.num_results)
         .map(|(t, l, d)| {
             result(
-                html_unescape(&t),
+                strip_markup(&html_unescape(&t)),
                 html_unescape(&l),
-                html_unescape(&d),
+                strip_markup(&html_unescape(&d)),
                 source,
             )
         })
@@ -273,11 +309,21 @@ impl SearchBackend for GoogleNewsBackend {
         let hl = hl.unwrap_or_else(|| "en".to_string());
         let gl = gl.unwrap_or_else(|| "US".to_string());
 
+        // Google News takes a recency operator inside the query itself.
+        let query = match opts
+            .time_range
+            .as_deref()
+            .and_then(crate::types::time_range_secs)
+        {
+            Some(secs) => format!("{} when:{}", args.query, humanize_when(secs)),
+            None => args.query.clone(),
+        };
+
         let resp = self
             .client
             .get(&self.base_url)
             .query(&[
-                ("q", args.query.as_str()),
+                ("q", query.as_str()),
                 ("hl", &format!("{}-{}", hl, gl.to_uppercase())),
                 ("gl", &gl.to_uppercase()),
                 ("ceid", &format!("{}:{}", gl.to_uppercase(), hl)),
@@ -405,13 +451,29 @@ impl Default for HnAlgoliaBackend {
 impl SearchBackend for HnAlgoliaBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
+        let mut params: Vec<(String, String)> = vec![
+            ("query".to_string(), args.query.clone()),
+            ("hitsPerPage".to_string(), opts.num_results.to_string()),
+        ];
+        if let Some(secs) = opts
+            .time_range
+            .as_deref()
+            .and_then(crate::types::time_range_secs)
+        {
+            let cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                .saturating_sub(secs);
+            params.push((
+                "numericFilters".to_string(),
+                format!("created_at_i>{cutoff}"),
+            ));
+        }
         let resp = self
             .client
             .get(&self.base_url)
-            .query(&[
-                ("query", args.query.as_str()),
-                ("hitsPerPage", &opts.num_results.to_string()),
-            ])
+            .query(&params)
             .send()
             .await
             .map_err(DaedraError::HttpError)?;

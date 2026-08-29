@@ -181,6 +181,15 @@ pub struct SearchOptions {
     /// Time range filter (e.g., "d" for day, "w" for week, "m" for month)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_range: Option<String>,
+
+    /// Restrict the search to these backend names. Unknown names are warned
+    /// about and ignored; an empty selection after filtering is an error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backends: Option<Vec<String>>,
+
+    /// Remove these backend names from the search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_backends: Option<Vec<String>>,
 }
 
 impl Default for SearchOptions {
@@ -190,7 +199,21 @@ impl Default for SearchOptions {
             safe_search: SafeSearchLevel::Moderate,
             num_results: 10,
             time_range: None,
+            backends: None,
+            exclude_backends: None,
         }
+    }
+}
+
+/// Seconds covered by a time-range letter (`d`, `w`, `m`, `y`). `None` for
+/// an unknown letter.
+pub fn time_range_secs(letter: &str) -> Option<u64> {
+    match letter {
+        "d" => Some(24 * 60 * 60),
+        "w" => Some(7 * 24 * 60 * 60),
+        "m" => Some(30 * 24 * 60 * 60),
+        "y" => Some(365 * 24 * 60 * 60),
+        _ => None,
     }
 }
 
