@@ -57,9 +57,13 @@ fn browser_default_headers() -> reqwest::header::HeaderMap {
 }
 
 lazy_static! {
-    /// Mojeek's organic result items. The list class has been stable for
-    /// years; both selectors must fail before a page counts as empty.
-    static ref RESULT_SELECTOR: Selector = Selector::parse("ul.results-standard > li, li.results-standard").unwrap();
+    /// Mojeek's organic result items. The current SERP (stylesheet v2.119)
+    /// wraps each result in an `<article>`; the `<li>` forms are the legacy
+    /// markup kept as fallbacks.
+    static ref RESULT_SELECTOR: Selector = Selector::parse(
+        ".results-standard > article, ul.results-standard > li, li.results-standard",
+    )
+    .unwrap();
     /// Result title link (class `ob`) with fallbacks for layout shifts.
     static ref TITLE_SELECTORS: [Selector; 3] = [
         Selector::parse("a.ob").unwrap(),
@@ -172,10 +176,22 @@ impl SearchBackend for MojeekBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let mut query: Vec<(&str, String)> = vec![
-            ("q", args.query.clone()),
-            ("tlen", opts.num_results.to_string()),
-        ];
+        // `t` is Mojeek's results-per-page parameter (10/20/30/40). The old
+        // request sent `tlen` here, which is the TITLE character limit — it
+        // silently truncated every title to `num_results` characters.
+        let mut query: Vec<(&str, String)> = vec![("q", args.query.clone())];
+        let per_page = if opts.num_results > 30 {
+            Some(40)
+        } else if opts.num_results > 20 {
+            Some(30)
+        } else if opts.num_results > 10 {
+            Some(20)
+        } else {
+            None // Mojeek's default is 10
+        };
+        if let Some(t) = per_page {
+            query.push(("t", t.to_string()));
+        }
         if let Some(safe) = safe_param(opts.safe_search) {
             query.push(("safe", safe.to_string()));
         }
@@ -257,6 +273,16 @@ mod tests {
       <li><a class="ob" href="/search?q=next">Next page</a></li>
     </ul></body></html>"#;
 
+    /// The current Mojeek SERP: `.results-standard` children are `<article>`
+    /// elements and the title link wraps an `<h2>`.
+    const MODERN_FIXTURE: &str = r#"<html><body><div class="results"><div class="results-standard">
+      <article><a class="ob" href="https://tokio.rs/"><h2>Tokio - An asynchronous Rust runtime</h2></a>
+          <p class="s">A runtime for writing reliable asynchronous applications.</p>
+          <div class="serp-meta"><span>tokio.rs</span></div></article>
+      <article><a class="ob" href="https://docs.rs/tokio"><h2>tokio - docs.rs</h2></a>
+          <p class="s">A event-driven, non-blocking I/O platform.</p></article>
+    </div></div></body></html>"#;
+
     #[test]
     fn test_parse_mojeek_results() {
         let backend = MojeekBackend::new();
@@ -266,6 +292,20 @@ mod tests {
         assert_eq!(results[0].metadata.source, "mojeek");
         assert!(results[0].description.contains("reliable asynchronous"));
         // Fallback title selector (h2 a) also parses.
+        assert_eq!(results[1].url, "https://docs.rs/tokio");
+    }
+
+    #[test]
+    fn test_parse_modern_article_layout() {
+        let backend = MojeekBackend::new();
+        let results = backend.parse_results(MODERN_FIXTURE, 10);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url, "https://tokio.rs/");
+        assert_eq!(
+            results[0].title,
+            "Tokio - An asynchronous Rust runtime".to_string()
+        );
+        assert!(results[0].description.contains("reliable asynchronous"));
         assert_eq!(results[1].url, "https://docs.rs/tokio");
     }
 

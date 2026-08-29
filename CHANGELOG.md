@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-29
+
+### Fixed
+- Mojeek result parsing. Mojeek now wraps each result in an `article` element instead of `li`. The parser matched the old markup, so a healthy result page parsed as zero results and was misreported as bot protection.
+- The results-per-page parameter. Requests sent `tlen`, which is Mojeek's title character limit; every title was silently truncated. Requests now send `t` (10, 20, 30, or 40) when more than the default ten results are wanted.
+
+
 ## [0.5.2] - 2026-08-29
 
 ### Fixed
