@@ -59,11 +59,17 @@ fn extract_bing_result(element: &ElementRef) -> Option<SearchResult> {
 /// Bing HTML scraping backend — parses search results from bing.com SERP pages.
 pub struct BingBackend {
     client: Client,
+    base_url: String,
 }
 
 impl BingBackend {
     /// Create a new Bing backend instance.
     pub fn new() -> Self {
+        Self::with_base_url(BING_URL.to_string())
+    }
+
+    /// Create a backend pointed at a custom search endpoint (tests).
+    pub fn with_base_url(base_url: String) -> Self {
         let client = Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(30))
@@ -72,7 +78,7 @@ impl BingBackend {
             .redirect(reqwest::redirect::Policy::limited(5))
             .build()
             .expect("Failed to build HTTP client");
-        Self { client }
+        Self { client, base_url }
     }
 
     fn parse_results(&self, html: &str, max_results: usize) -> Vec<SearchResult> {
@@ -107,7 +113,7 @@ impl SearchBackend for BingBackend {
 
         let resp = self
             .client
-            .get(BING_URL)
+            .get(&self.base_url)
             .query(&query)
             .send()
             .await
@@ -125,7 +131,28 @@ impl SearchBackend for BingBackend {
         let results = self.parse_results(&html, opts.num_results);
 
         if results.is_empty() {
-            warn!("Bing returned 0 results — may be blocked or CAPTCHA");
+            if let Some(marker) = super::soft_block::matched_block_marker(
+                &html,
+                &[
+                    "captcha",
+                    "verify you are human",
+                    "unusual traffic",
+                    "challenge",
+                    "enable javascript",
+                ],
+            ) {
+                warn!(marker, "Bing served an anti-bot page");
+                return Err(DaedraError::BotProtectionDetected);
+            }
+            match super::soft_block::classify(&html, &["there are no results for", "b_no"]) {
+                super::soft_block::EmptyPage::GenuineNoResults => {
+                    info!("Bing genuinely reports no results for this query");
+                },
+                super::soft_block::EmptyPage::SoftBlock => {
+                    warn!("Bing zero-result page classified as soft block");
+                    return Err(super::soft_block::soft_block_error("Bing", None));
+                },
+            }
         }
 
         info!(

@@ -17,6 +17,7 @@ pub mod github;
 pub mod google;
 pub mod search;
 pub mod serper;
+pub mod soft_block;
 pub mod stackexchange;
 pub mod tavily;
 pub mod wiby;

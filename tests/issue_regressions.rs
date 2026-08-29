@@ -550,3 +550,63 @@ mod issue9 {
         );
     }
 }
+
+// Follow-up to the aggregate-failure fix: scraper backends must classify
+// 200-with-zero-results anti-bot pages as soft blocks (an error), not as a
+// legitimate empty result — otherwise the aggregate error still claims
+// "0 results" for blocked scrapers.
+mod soft_block {
+    use super::*;
+    use daedra::tools::bing::BingBackend;
+    use daedra::types::{DaedraError, SearchArgs, SearchOptions};
+
+    #[tokio::test]
+    async fn bing_zero_result_page_without_no_results_marker_is_soft_block() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/search"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string(
+                "<html><body><div class=\"challenge\">Please verify</div></body></html>",
+            ))
+            .mount(&server)
+            .await;
+        let backend = BingBackend::with_base_url(format!("{}/search", server.uri()));
+        let args = SearchArgs {
+            query: "rust".into(),
+            options: Some(SearchOptions::default()),
+        };
+        let err = backend
+            .search(&args)
+            .await
+            .expect_err("challenge page must not be empty-Ok");
+        match err {
+            DaedraError::BotProtectionDetected => {},
+            other => panic!("expected BotProtectionDetected, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn bing_unknown_zero_result_page_is_soft_block_error() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .and(wiremock::matchers::path("/search"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_string("<html><body></body></html>"),
+            )
+            .mount(&server)
+            .await;
+        let backend = BingBackend::with_base_url(format!("{}/search", server.uri()));
+        let args = SearchArgs {
+            query: "rust".into(),
+            options: Some(SearchOptions::default()),
+        };
+        let err = backend
+            .search(&args)
+            .await
+            .expect_err("unknown empty must be soft block");
+        assert!(
+            err.to_string().contains("soft block"),
+            "expected soft-block SearchError, got {err}"
+        );
+    }
+}
