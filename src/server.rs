@@ -1283,6 +1283,7 @@ mod tests {
             content: "Hello world".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             word_count: 2,
+            content_type: None,
             links: None,
         };
         let formatted = format_page_result(&content);
