@@ -612,3 +612,96 @@ mod soft_block {
         );
     }
 }
+
+// Mojeek's bot wall has two layers. Untrusted networks get a plain 403.
+// Trusted networks with a non-browser client get a silent non-HTML 200,
+// which used to surface as a generic zero-result soft block. The backend
+// must name the cause, and its genuine empty-page marker (class
+// "no-results") must produce an honest empty response, not an error.
+mod mojeek_wall {
+    use daedra::tools::backend::SearchBackend;
+    use daedra::tools::mojeek::MojeekBackend;
+    use daedra::types::{SearchArgs, SearchOptions};
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{method, path},
+    };
+
+    fn args() -> SearchArgs {
+        SearchArgs {
+            query: "tokio".into(),
+            options: Some(SearchOptions::default()),
+        }
+    }
+
+    #[tokio::test]
+    async fn mojeek_non_html_200_names_the_bot_wall() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(b"\x00\x01binary".to_vec(), "application/octet-stream"),
+            )
+            .mount(&server)
+            .await;
+        let backend = MojeekBackend::with_base_url(format!("{}/search", server.uri()));
+        let err = backend
+            .search(&args())
+            .await
+            .expect_err("non-HTML 200 must error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("octet-stream") && msg.contains("bot wall"),
+            "expected bot-wall detail, got {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mojeek_no_results_class_is_a_genuine_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    r#"<html><body><div class="no-results"></div></body></html>"#
+                        .as_bytes()
+                        .to_vec(),
+                    "text/html",
+                ),
+            )
+            .mount(&server)
+            .await;
+        let backend = MojeekBackend::with_base_url(format!("{}/search", server.uri()));
+        let resp = backend
+            .search(&args())
+            .await
+            .expect("a marked empty page is a genuine empty, not a soft block");
+        assert_eq!(resp.data.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn mojeek_sends_browser_navigation_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    r#"<html><body><ul class="results-standard"><li><a class="ob" href="https://tokio.rs/">Tokio</a><p class="s">runtime</p></li></ul></body></html>"#.as_bytes().to_vec(),
+                    "text/html",
+                ),
+            )
+            .mount(&server)
+            .await;
+        let backend = MojeekBackend::with_base_url(format!("{}/search", server.uri()));
+        backend.search(&args()).await.expect("mock page parses");
+        let requests = server.received_requests().await.expect("requests recorded");
+        assert!(!requests.is_empty());
+        let accept = requests[0]
+            .headers
+            .iter()
+            .find(|(name, _)| name.as_str() == "accept")
+            .expect("Accept header must be sent");
+        assert!(accept.1.to_str().unwrap().contains("text/html"));
+    }
+}

@@ -22,6 +22,40 @@ use tracing::{info, warn};
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MOJEEK_URL: &str = "https://www.mojeek.com/search";
 
+/// The headers a real browser sends on a top-level navigation. Mojeek's bot
+/// wall has two layers: untrusted networks get a plain 403, while trusted
+/// networks with a non-browser client (plain reqwest TLS fingerprint) get a
+/// silent non-HTML 200 that parses as zero results. The full header set is
+/// the cheapest honest way to look like the browser the UA claims to be.
+fn browser_default_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, HeaderMap, HeaderName, HeaderValue};
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ),
+    );
+    headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
+    headers.insert(
+        HeaderName::from_static("upgrade-insecure-requests"),
+        HeaderValue::from_static("1"),
+    );
+    headers.insert(
+        HeaderName::from_static("sec-fetch-dest"),
+        HeaderValue::from_static("document"),
+    );
+    headers.insert(
+        HeaderName::from_static("sec-fetch-mode"),
+        HeaderValue::from_static("navigate"),
+    );
+    headers.insert(
+        HeaderName::from_static("sec-fetch-site"),
+        HeaderValue::from_static("none"),
+    );
+    headers
+}
+
 lazy_static! {
     /// Mojeek's organic result items. The list class has been stable for
     /// years; both selectors must fail before a page counts as empty.
@@ -102,6 +136,7 @@ impl MojeekBackend {
     pub fn with_base_url(base_url: String) -> Self {
         let client = Client::builder()
             .user_agent(USER_AGENT)
+            .default_headers(browser_default_headers())
             .timeout(Duration::from_secs(30))
             .gzip(true)
             .brotli(true)
@@ -161,12 +196,41 @@ impl SearchBackend for MojeekBackend {
             )));
         }
 
+        // A 200 that is not HTML is Mojeek's quiet bot wall for trusted
+        // networks: the request reached it, but its client fingerprinting
+        // did not clear the automated client. Say so instead of reporting
+        // an unparseable zero-result page.
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_lowercase();
+        if !content_type.contains("text/html") && !content_type.contains("application/xhtml") {
+            warn!(content_type = %content_type, "Mojeek served a non-HTML response");
+            return Err(DaedraError::SearchError(format!(
+                "Mojeek served {content_type} instead of HTML — its bot wall flagged the \
+                 automated client; results are unavailable from this machine"
+            )));
+        }
+
         let html = resp.text().await.map_err(DaedraError::HttpError)?;
 
         let results = self.parse_results(&html, opts.num_results);
 
         if results.is_empty() {
-            match soft_block::classify(&html, &["no results found", "did not match"]) {
+            match soft_block::classify(
+                &html,
+                &[
+                    "no results found",
+                    "did not match",
+                    // Mojeek's empty result list carries this class; the
+                    // current stylesheet (v2.119) still ships `.no-results`.
+                    "no-results",
+                    "there are no results",
+                    "no results for",
+                ],
+            ) {
                 EmptyPage::GenuineNoResults => {
                     info!("Mojeek genuinely reports no results for this query");
                 },
