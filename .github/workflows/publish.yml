@@ -167,7 +167,7 @@ jobs:
           Get-FileHash ${{ matrix.asset_name }}.zip -Algorithm SHA256 | Format-List > ${{ matrix.asset_name }}.zip.sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset_name }}
           path: |
