@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-29
+
+### Fixed
+- Dependency manifest: pdf-extract 0.12 (patched lopdf ^0.42) so downstream consumers stop resolving the vulnerable lopdf 0.38 train
+
 ## [0.3.3] - 2026-08-29
 
 ### Added
