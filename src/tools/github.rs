@@ -49,6 +49,12 @@ impl GitHubBackend {
     }
 }
 
+impl Default for GitHubBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for GitHubBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {

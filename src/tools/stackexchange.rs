@@ -50,6 +50,12 @@ impl StackExchangeBackend {
     }
 }
 
+impl Default for StackExchangeBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for StackExchangeBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {

@@ -43,6 +43,12 @@ impl WibyBackend {
     }
 }
 
+impl Default for WibyBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SearchBackend for WibyBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
