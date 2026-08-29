@@ -5,7 +5,7 @@
 <h1 align="center">Daedra</h1>
 
 <p align="center">
-  Self-contained web search MCP server. Rust. 16 backends. Works from any IP.<br>
+  Self-contained web search MCP server. Rust. 16 backends. Marginalia answers from any IP; Mojeek and Brave need a residential IP. Basic search needs no API keys.<br>
   Single binary. Relevance-ranked multi-backend search. Zero configuration for basic search.
 </p>
 
@@ -40,7 +40,7 @@ Per-backend circuit breakers and per-backend rate limits keep the chain stable u
 - Per-backend rate limits via `governor`, with separate quotas for API, knowledge, and scraper backends
 - Classified retry: the chain retries only transient errors
 - Readability extraction: `dom_smoothie` extracts the article body from HTML pages
-- PDF support: `infer` detects the MIME type, `pdf-extract` extracts the text
+- PDF support: `infer` detects the MIME type, `pdf-inspector` extracts Markdown (OCR-needing pages are reported)
 - Content classification: `FetchedContent` (`Html` / `Pdf` / `Binary`) on every fetch
 - URL classification: `src/url_classification.rs` maps search result URLs to content types
 - MCP tools: `web_search`, `visit_page`, `crawl_site`, and the `search_duckduckgo` alias
@@ -98,7 +98,7 @@ daedra search "rust async runtime" --num-results 5
 daedra search "crate release" --backend hn --time-range w
 daedra search "tokio" --exclude bing-rss --exclude gnews
 
-# Fetch a webpage as Markdown (HTML via Readability, PDF via pdf-extract)
+# Fetch a webpage as Markdown (HTML via Readability, PDF via pdf-inspector)
 daedra fetch https://rust-lang.org
 daedra fetch https://example.com/report.pdf --timeout 60
 daedra fetch https://example.com/report.docx   # docx, odt, epub, pptx, xlsx, csv too
@@ -159,7 +159,7 @@ Search the web with automatic backend fallback.
 
 ### `visit_page`
 
-Fetch a page and extract the content as Markdown. HTML pages use `dom_smoothie` Readability extraction. The `infer` crate detects PDFs, and `pdf-extract` extracts the text.
+Fetch a page and extract the content as Markdown. HTML pages use `dom_smoothie` Readability extraction. The `infer` crate detects PDFs, and `pdf-inspector` extracts Markdown. Office documents (docx, doc, odt, rtf, epub, pptx, xlsx, csv) convert via `anydoc`.
 
 ```json
 {
@@ -185,7 +185,7 @@ Daedra
 │   ├── WibyBackend / DdgInstantBackend
 │   └── SearchClient (DuckDuckGo HTML, last resort)
 ├── FetchClient (FetchedContent: Html / Pdf / Binary → Markdown)
-│   ├── dom_smoothie (Readability), infer (MIME), pdf-extract (PDF)
+│   ├── dom_smoothie (Readability), infer (MIME), pdf-inspector (PDF), anydoc (Office)
 ├── soft_block (classifies zero-result scraper pages: genuine empty or bot block)
 ├── url_classification (search result URL → ContentType)
 ├── SearchCache (moka async cache)
@@ -201,7 +201,8 @@ Daedra
 |-------|------|
 | `dom_smoothie` 0.17 | Readability article extraction |
 | `infer` 0.19 | MIME detection on fetched bytes |
-| `pdf-extract` 0.12 | PDF text extraction |
+| `pdf-inspector` 1.17 | PDF → Markdown extraction |
+| `anydoc` 0.2 | Office and ebook documents → Markdown |
 | `quick-xml` 0.42 | RSS parsing for the machine-format backends |
 | `governor` 0.10 | Per-backend keyed rate limiting |
 

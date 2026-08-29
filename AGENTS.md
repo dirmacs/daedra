@@ -25,7 +25,7 @@ Daedra is a web search MCP server. It gives search and fetch tools to AI agents 
 | `src/tools/backend.rs` | `SearchProvider`, `BackendHealth` circuit breakers, `governor` keyed limiters, classified retry, aggregate failure messages |
 | `src/tools/rss.rs` | Machine-format backends: Bing RSS, Google News RSS, HN Algolia |
 | `src/tools/soft_block.rs` | Zero-result page classifier: genuine no-results or soft block |
-| `src/tools/fetch.rs` | `FetchClient`, `FetchedContent` (Html/Pdf/Binary), dom_smoothie, infer, pdf-extract |
+| `src/tools/fetch.rs` | `FetchClient`, `FetchedContent` (Html/Pdf/Document/Text/Binary), dom_smoothie, infer, pdf-inspector, anydoc |
 | `src/tools/crawl.rs` | Site crawl (sitemap + link following) |
 | `src/tools/bing.rs`, `src/tools/google.rs` | HTML scraper backends |
 | `src/tools/*.rs` | Other individual search backends |
@@ -44,5 +44,5 @@ Daedra is a web search MCP server. It gives search and fetch tools to AI agents 
 ## Fetch and extraction
 
 - HTML: dom_smoothie Readability when no CSS selector is given. The selector path uses scraper and htmd.
-- PDF: `infer` detects `application/pdf`. `pdf-extract` extracts the text.
+- PDF: `infer` detects `application/pdf`. `pdf-inspector` extracts Markdown. Office documents: `anydoc` converts to Markdown.
 - Unknown binary: `FetchedContent::Binary` returns a clear extraction error.
