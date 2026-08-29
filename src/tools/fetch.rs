@@ -4,15 +4,29 @@
 //! their content as Markdown.
 
 use crate::types::{DaedraError, DaedraResult, PageContent, PageLink, VisitPageArgs};
-use backoff::{ExponentialBackoff, future::retry};
 use dom_smoothie::Readability;
 use lazy_static::lazy_static;
 use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info, instrument, warn};
 use url::Url;
+
+/// Retry classification for the fetch loop. `Transient` errors retry with
+/// backoff. `Permanent` errors return to the caller at once. A bare
+/// `DaedraError` converts to `Permanent`: only network-layer errors are
+/// transient, and the loop wraps those explicitly.
+enum RetryErr {
+    Transient(DaedraError),
+    Permanent(DaedraError),
+}
+
+impl From<DaedraError> for RetryErr {
+    fn from(e: DaedraError) -> Self {
+        RetryErr::Permanent(e)
+    }
+}
 
 /// Default user agent for requests
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -265,69 +279,82 @@ impl FetchClient {
 
     /// Fetch page content with retry logic
     async fn fetch_with_retry(&self, url: &str) -> DaedraResult<FetchedContent> {
-        let backoff = ExponentialBackoff {
-            max_elapsed_time: Some(Duration::from_secs(60)),
-            ..Default::default()
-        };
-
         let client = self.client.clone();
         let url = url.to_string();
 
-        retry(backoff, || async {
-            let response = client.get(&url).send().await.map_err(|e| {
-                warn!(error = %e, url = %url, "Fetch request failed, retrying...");
-                backoff::Error::transient(DaedraError::HttpError(e))
-            })?;
+        // Inline retry loop: transient errors (network) retry with doubling
+        // delays from 400 ms to 2 s inside a 60 s window. Permanent errors
+        // return at once. Replaces the unmaintained `backoff` crate.
+        let mut delay = Duration::from_millis(400);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let outcome = async {
+                let response = client.get(&url).send().await.map_err(|e| {
+                    warn!(error = %e, url = %url, "Fetch request failed, retrying...");
+                    RetryErr::Transient(DaedraError::HttpError(e))
+                })?;
 
-            classify_response_status(response.status(), &url)?;
+                classify_response_status(response.status(), &url)?;
 
-            if let Some(content_length) = response.content_length()
-                && content_length as usize > MAX_CONTENT_SIZE
-            {
-                return Err(backoff::Error::permanent(DaedraError::FetchError(
-                    "Content too large".to_string(),
-                )));
-            }
+                if let Some(content_length) = response.content_length()
+                    && content_length as usize > MAX_CONTENT_SIZE
+                {
+                    return Err(RetryErr::Permanent(DaedraError::FetchError(
+                        "Content too large".to_string(),
+                    )));
+                }
 
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("")
-                .to_string();
+                let content_type = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
 
-            let ct = normalize_content_type(&content_type);
+                let ct = normalize_content_type(&content_type);
 
-            if ct.contains("application/pdf") {
+                if ct.contains("application/pdf") {
+                    let bytes = response.bytes().await.map_err(|e| {
+                        error!(error = %e, url = %url, "Failed to read response body");
+                        RetryErr::Permanent(DaedraError::HttpError(e))
+                    })?;
+                    check_body_size(bytes.len())?;
+                    return Ok(extract_pdf_content(&bytes)?);
+                }
+
+                if is_known_binary_content_type(&ct) {
+                    let bytes = response.bytes().await.map_err(|e| {
+                        error!(error = %e, url = %url, "Failed to read response body");
+                        RetryErr::Permanent(DaedraError::HttpError(e))
+                    })?;
+                    check_body_size(bytes.len())?;
+                    return Ok(FetchedContent::Binary {
+                        mime: ct,
+                        size: bytes.len(),
+                    });
+                }
+
                 let bytes = response.bytes().await.map_err(|e| {
                     error!(error = %e, url = %url, "Failed to read response body");
-                    backoff::Error::permanent(DaedraError::HttpError(e))
+                    RetryErr::Permanent(DaedraError::HttpError(e))
                 })?;
                 check_body_size(bytes.len())?;
-                return Ok(extract_pdf_content(&bytes)?);
+
+                classify_fetched_content(&content_type, &bytes).map_err(RetryErr::Permanent)
+            };
+
+            match outcome.await {
+                Ok(content) => return Ok(content),
+                Err(RetryErr::Permanent(e)) => return Err(e),
+                Err(RetryErr::Transient(e)) => {
+                    if Instant::now() + delay > deadline {
+                        return Err(e);
+                    }
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(2));
+                },
             }
-
-            if is_known_binary_content_type(&ct) {
-                let bytes = response.bytes().await.map_err(|e| {
-                    error!(error = %e, url = %url, "Failed to read response body");
-                    backoff::Error::permanent(DaedraError::HttpError(e))
-                })?;
-                check_body_size(bytes.len())?;
-                return Ok(FetchedContent::Binary {
-                    mime: ct,
-                    size: bytes.len(),
-                });
-            }
-
-            let bytes = response.bytes().await.map_err(|e| {
-                error!(error = %e, url = %url, "Failed to read response body");
-                backoff::Error::permanent(DaedraError::HttpError(e))
-            })?;
-            check_body_size(bytes.len())?;
-
-            classify_fetched_content(&content_type, &bytes).map_err(backoff::Error::permanent)
-        })
-        .await
+        }
     }
 
     /// Check for bot protection indicators
@@ -469,10 +496,7 @@ fn is_retryable_status(status: u16) -> bool {
     status == 429
 }
 
-fn classify_response_status(
-    status: reqwest::StatusCode,
-    url: &str,
-) -> Result<(), backoff::Error<DaedraError>> {
+fn classify_response_status(status: reqwest::StatusCode, url: &str) -> Result<(), RetryErr> {
     if status.is_success() {
         return Ok(());
     }
@@ -480,16 +504,14 @@ fn classify_response_status(
     warn!(status = %status, url = %url, "Fetch returned non-success status");
 
     if is_retryable_status(status.as_u16()) {
-        return Err(backoff::Error::transient(DaedraError::RateLimitExceeded));
+        return Err(RetryErr::Transient(DaedraError::RateLimitExceeded));
     }
 
     if status.as_u16() == 403 {
-        return Err(backoff::Error::permanent(
-            DaedraError::BotProtectionDetected,
-        ));
+        return Err(RetryErr::Permanent(DaedraError::BotProtectionDetected));
     }
 
-    Err(backoff::Error::permanent(DaedraError::FetchError(format!(
+    Err(RetryErr::Permanent(DaedraError::FetchError(format!(
         "HTTP {}",
         status
     ))))

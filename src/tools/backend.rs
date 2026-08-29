@@ -8,8 +8,6 @@
 
 use crate::types::{DaedraError, DaedraResult, SearchArgs, SearchResponse};
 use async_trait::async_trait;
-use backoff::ExponentialBackoff;
-use backoff::backoff::Backoff;
 use governor::{DefaultDirectRateLimiter, DefaultKeyedRateLimiter, Quota, RateLimiter};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -325,15 +323,9 @@ impl SearchProvider {
     }
 
     async fn retry_once(b: &dyn SearchBackend, args: &SearchArgs) -> DaedraResult<SearchResponse> {
-        let mut backoff = ExponentialBackoff {
-            initial_interval: Duration::from_millis(400),
-            max_interval: Duration::from_secs(2),
-            max_elapsed_time: Some(Duration::from_secs(3)),
-            ..Default::default()
-        };
-        if let Some(delay) = backoff.next_backoff() {
-            tokio::time::sleep(delay).await;
-        }
+        // One retry after a fixed 400 ms pause. The caller classifies errors;
+        // only transient errors reach this function.
+        tokio::time::sleep(Duration::from_millis(400)).await;
         b.search(args).await
     }
 

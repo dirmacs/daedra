@@ -10,19 +10,25 @@ use crate::types::{
     SearchResponse, SearchResult,
 };
 use async_trait::async_trait;
-use backoff::{ExponentialBackoff, future::retry};
 use futures::future::join_all;
 use lazy_static::lazy_static;
 use regex::Regex;
 use reqwest::Client;
 use scraper::{ElementRef, Html, Selector};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info, instrument, warn};
 use url::Url;
 
 /// Default user agent for requests
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/// Retry classification for the DDG search request loop. `Transient` errors
+/// retry with backoff. `Permanent` errors return to the caller at once.
+enum Retry {
+    Transient(DaedraError),
+    Permanent(DaedraError),
+}
 
 /// DuckDuckGo HTML search URL
 const DDG_HTML_URL: &str = "https://html.duckduckgo.com/html/";
@@ -138,49 +144,63 @@ impl SearchClient {
         params
     }
 
-    /// Execute search with exponential backoff retry
+    /// Execute search with exponential backoff retry. Transient errors
+    /// (network, 429) retry with doubling delays from 400 ms to 2 s, at most
+    /// four attempts in a 60 s window. Permanent errors return at once.
     async fn execute_search_with_retry(&self, params: &[(&str, String)]) -> DaedraResult<String> {
-        let backoff = ExponentialBackoff {
-            max_elapsed_time: Some(Duration::from_secs(60)),
-            ..Default::default()
-        };
-
         let client = self.client.clone();
         let params_owned: Vec<(String, String)> = params
             .iter()
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
 
-        retry(backoff, || async {
-            let response = client
-                .post(DDG_HTML_URL)
-                .form(&params_owned)
-                .send()
-                .await
-                .map_err(|e| {
-                    warn!(error = %e, "Search request failed, retrying...");
-                    backoff::Error::transient(DaedraError::HttpError(e))
-                })?;
+        let mut delay = Duration::from_millis(400);
+        let deadline = Instant::now() + Duration::from_secs(60);
 
-            if !response.status().is_success() {
-                let status = response.status();
-                warn!(status = %status, "Search returned non-success status");
+        loop {
+            let attempt = async {
+                let response = client
+                    .post(DDG_HTML_URL)
+                    .form(&params_owned)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        warn!(error = %e, "Search request failed, retrying...");
+                        Retry::Transient(DaedraError::HttpError(e))
+                    })?;
 
-                if status.as_u16() == 429 {
-                    return Err(backoff::Error::transient(DaedraError::RateLimitExceeded));
+                if !response.status().is_success() {
+                    let status = response.status();
+                    warn!(status = %status, "Search returned non-success status");
+
+                    if status.as_u16() == 429 {
+                        return Err(Retry::Transient(DaedraError::RateLimitExceeded));
+                    }
+
+                    return Err(Retry::Permanent(DaedraError::SearchError(format!(
+                        "HTTP {status}"
+                    ))));
                 }
 
-                return Err(backoff::Error::permanent(DaedraError::SearchError(
-                    format!("HTTP {}", status),
-                )));
-            }
+                response.text().await.map_err(|e| {
+                    error!(error = %e, "Failed to read response body");
+                    Retry::Permanent(DaedraError::HttpError(e))
+                })
+            };
 
-            response.text().await.map_err(|e| {
-                error!(error = %e, "Failed to read response body");
-                backoff::Error::permanent(DaedraError::HttpError(e))
-            })
-        })
-        .await
+            return match attempt.await {
+                Ok(text) => Ok(text),
+                Err(Retry::Permanent(e)) => Err(e),
+                Err(Retry::Transient(e)) => {
+                    if Instant::now() + delay > deadline {
+                        return Err(e);
+                    }
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(2));
+                    continue;
+                },
+            };
+        }
     }
 
     /// Parse search results from HTML response

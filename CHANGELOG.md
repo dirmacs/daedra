@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-08-29
+
+### Added
+- Dependabot config (cargo and github-actions, weekly) so dependency bumps arrive before the CI audit gate blocks a release.
+
+### Fixed
+- The release pipeline now works end to end:
+  - `Dockerfile` builds in a multi-stage build. The old image copied a host-built binary that never exists on a clean checkout, so every docker build failed.
+  - The release workflow declares `permissions: contents: write`. Without it, the release-asset upload failed with "Resource not accessible by integration", and the binary-cancel cascade left releases with no assets.
+  - The binary-build matrix no longer cancels the other four legs when one leg fails.
+  - All workflow toolchains pinned to 1.98.
+
+### Changed
+- Removed the unmaintained `backoff` crate (and its `instant` dependency). The fetch and DDG-search retry loops now use inline exponential backoff with the same timing. Unmaintained-crate warnings in `cargo audit` drop from 8 to 3.
+
+## [0.3.9] - 2026-08-29
+
 ## [0.3.9] - 2026-08-29
 
 ### Changed
