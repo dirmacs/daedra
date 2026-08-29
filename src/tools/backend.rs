@@ -731,21 +731,36 @@ cuit_note}",
             )));
         }
 
-        let merged = Self::merge_ranked_results(&by_source, &args.query, target_count);
+        let mut merged = Self::merge_ranked_results(&by_source, &args.query, target_count);
 
-        // A backend that ignored the query still "wins" when every backend
-        // scored zero. That output is worse than none for an agent — it
-        // looks like an answer. Discard it and say so.
         let tokens = query_tokens(&args.query);
-        if !tokens.is_empty() && merged.iter().all(|r| relevance_score(r, &tokens) == 0.0) {
-            let tried: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
-            return Err(DaedraError::SearchError(format!(
-                "No search results matched the query {:?}; {} unrelated result(s) from [{}] \
-                 were discarded. Try fewer or different keywords.",
-                args.query,
-                merged.len(),
-                tried.join(", ")
-            )));
+        if !tokens.is_empty() {
+            let matched: Vec<bool> = merged
+                .iter()
+                .map(|r| relevance_score(r, &tokens) > 0.0)
+                .collect();
+            if matched.iter().any(|m| *m) {
+                // Real matches exist: drop the never-matched filler instead of
+                // padding the list to `num_results` with it.
+                let keep: Vec<crate::types::SearchResult> = merged
+                    .into_iter()
+                    .zip(matched)
+                    .filter(|(_, m)| *m)
+                    .map(|(r, _)| r)
+                    .collect();
+                merged = keep;
+            } else {
+                // Nothing matched, not even a fragment: an engine ignored the
+                // query, and its output is worse than none for an agent.
+                let tried: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
+                return Err(DaedraError::SearchError(format!(
+                    "No search results matched the query {:?}; {} unrelated result(s) from [{}] \
+                     were discarded. Try fewer or different keywords.",
+                    args.query,
+                    merged.len(),
+                    tried.join(", ")
+                )));
+            }
         }
 
         let sources: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
@@ -863,18 +878,42 @@ fn query_tokens(query: &str) -> Vec<String> {
         .collect()
 }
 
+/// True when `hay` contains a leading fragment of `token` at least half the
+/// token long (minimum four characters). Search engines answer rare names
+/// with stem matches ("baalateja" → "Baalat Gebal"); the literal token never
+/// appears, so pure containment scoring rejects every result. The half-token
+/// bar keeps keyboard-mash fragments ("asdf" inside "asdfqwertzxcv") from
+/// counting: close-name stems pass, coincidental slivers do not.
+fn partial_hit(token: &str, hay: &str) -> bool {
+    let min = 4;
+    if token.len() <= min {
+        return false;
+    }
+    let need = token.len().div_ceil(2).max(min);
+    let max = token.len() - 1;
+    (need..=max).rev().any(|l| hay.contains(&token[..l]))
+}
+
 /// Share of query tokens present in a result's title, URL, or description.
 /// The URL counts — a domain like `tokio.rs` should match "tokio". An empty
 /// token list scores everything neutral (1.0), which keeps the k-way merge
 /// order equivalent to the old round-robin when the query carries no signal.
+/// A token whose leading fragment appears in the result counts half.
 fn relevance_score(r: &crate::types::SearchResult, tokens: &[String]) -> f64 {
     if tokens.is_empty() {
         return 1.0;
     }
     let title_hay = format!("{} {}", r.title, r.url).to_lowercase();
     let hay = format!("{title_hay} {}", r.description).to_lowercase();
-    let hits = tokens.iter().filter(|t| hay.contains(t.as_str())).count();
-    let mut score = hits as f64 / tokens.len() as f64;
+    let mut score = 0.0;
+    for t in tokens {
+        if hay.contains(t.as_str()) {
+            score += 1.0;
+        } else if partial_hit(t, &hay) {
+            score += 0.5;
+        }
+    }
+    score /= tokens.len() as f64;
     // Full-phrase bonus: the query words in order ("capital ... france" in
     // "Capital of France") outrank a story that merely contains both words.
     if tokens_in_order(&title_hay, tokens) {
@@ -1058,6 +1097,37 @@ mod tests {
         assert_eq!(merged[1].url, "https://tokio.rs/tutorial");
         assert_eq!(merged[2].url, "https://betting.example/vn");
         assert_eq!(merged[3].url, "https://install.example/chrome");
+    }
+
+    #[test]
+    fn test_relevance_score_gives_prefix_credit() {
+        // Rare names: engines answer with stem matches ("baalateja" →
+        // "Baalat") and the literal token never appears. The fragment must
+        // still score half, and only when it covers half the token.
+        let tokens = query_tokens("baalateja");
+        let r = test_search_result("https://en.wikipedia.org/wiki/Baalat_Gebal", "Baalat Gebal");
+        let score = relevance_score(&r, &tokens);
+        assert!((score - 0.5).abs() < 1e-9, "expected 0.5, got {score}");
+        // A sliver shorter than half the token earns nothing.
+        let sliver = test_search_result("https://en.wikipedia.org/wiki/Baal", "Baal - Wikipedia");
+        assert_eq!(relevance_score(&sliver, &tokens), 0.0);
+        // Short tokens cannot produce a meaningful fragment: no credit.
+        let short = query_tokens("rust");
+        let unrelated = test_search_result("https://example.com/x", "Unrelated page");
+        assert_eq!(relevance_score(&unrelated, &short), 0.0);
+    }
+
+    #[test]
+    fn test_merge_ranked_all_zero_still_ranks_prefix_matches() {
+        let stem = test_search_result("https://en.wikipedia.org/wiki/Baalat_Gebal", "Baalat Gebal");
+        let junk = test_search_result("https://betting.example/vn", "Football betting odds");
+        let by_source = vec![
+            ("bing-rss".to_string(), vec![junk]),
+            ("wikipedia".to_string(), vec![stem]),
+        ];
+        let merged = SearchProvider::merge_ranked_results(&by_source, "baalateja", 2);
+        // The fragment match outranks the fully unrelated result.
+        assert_eq!(merged[0].url, "https://en.wikipedia.org/wiki/Baalat_Gebal");
     }
 
     #[test]

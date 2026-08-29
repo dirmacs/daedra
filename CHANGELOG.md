@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-29
+
+### Fixed
+- Rare-name and single-word queries no longer fail. Search engines answer names with stem matches; the literal query token never appears in the results, so the relevance gate discarded every result and returned an error. A query-token fragment covering at least half the token now scores half a hit. The query "baalateja" returns its stem matches instead of failing.
+- Results that match nothing are dropped when real matches exist. Previously they padded the list to the requested count after the last relevant entry.
+- Default log level is now `warn`. Normal runs print results only. The per-backend progress chatter remains available under `--verbose`.
+
+
 ## [0.5.0] - 2026-08-29
 
 ### Added
