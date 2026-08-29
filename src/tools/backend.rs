@@ -217,9 +217,23 @@ impl SearchProvider {
             backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
         }
 
+        // Bing via its machine-readable RSS output — same index as the HTML
+        // SERP, served to integrations without challenge pages. First no-key
+        // general web backend tried.
+        info!("Bing RSS backend enabled (no API key, bot-tolerant machine format)");
+        backends.push(Box::new(super::rss::BingRssBackend::new()));
+
         // Bing HTML scraping — no API key, but often CAPTCHA-blocked from datacenter IPs
         info!("Bing backend enabled (no API key, may be blocked from datacenter IPs)");
         backends.push(Box::new(super::bing::BingBackend::new()));
+
+        // Google News RSS — news coverage, no challenges.
+        info!("Google News backend enabled (no API key, bot-tolerant machine format)");
+        backends.push(Box::new(super::rss::GoogleNewsBackend::new()));
+
+        // Hacker News via the public Algolia API — no key, strong for technical queries.
+        info!("Hacker News backend enabled (no API key, Algolia JSON)");
+        backends.push(Box::new(super::rss::HnAlgoliaBackend::new()));
 
         // Google HTML scraping — no API key, but CAPTCHA-prone from datacenter IPs
         info!("Google backend enabled (no API key, may be blocked from datacenter IPs)");

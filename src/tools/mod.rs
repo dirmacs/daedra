@@ -15,6 +15,7 @@ pub mod ddg_instant;
 pub mod fetch;
 pub mod github;
 pub mod google;
+pub mod rss;
 pub mod search;
 pub mod serper;
 pub mod soft_block;

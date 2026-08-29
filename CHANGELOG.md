@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-08-29
+
+### Added
+- Three bot-tolerant machine-format backends — same engines, no challenge pages, no keys, verified from datacenter IPs:
+  - **Bing RSS** (`bing-rss`): the regular Bing index via `format=rss`, tried before HTML scraping
+  - **Google News** (`gnews`): Google News RSS feed with region mapping
+  - **Hacker News** (`hn`): the public HN Algolia JSON API, strong for technical queries
+- Fallback chain is now 13 backends; the bot-tolerant tier means most queries succeed even when SERP scraping is blocked
+
 ## [0.3.6] - 2026-08-29
 
 ### Fixed
