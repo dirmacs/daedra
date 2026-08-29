@@ -36,10 +36,10 @@ Daedra is a web search MCP server. It gives search and fetch tools to AI agents 
 
 - Circuit breaker: `BackendHealth` opens after 3 consecutive failures, with a 30 second cooldown per backend name.
 - Rate limits: `BackendRateLimiters` — separate keyed quotas for API, knowledge, and scraper backends.
-- Classified retry: transient backend errors get one exponential-backoff retry (400 ms to 2 s). Bot protection, 403, CAPTCHA, and rate-limit errors do not retry.
+- Classified retry: transient backend errors get one retry after a 400 ms pause. Bot protection, 403, CAPTCHA, and rate-limit errors do not retry.
 - Aggregate failures: the error message names each failed backend with its error, and each backend that returned a true empty result. Do not merge these two cases into one message.
 - Soft blocks: a scraper page with HTTP 200 and zero results is a soft block (an error), not an empty result. The classifier in `src/tools/soft_block.rs` decides.
-- Fetch retry: `fetch_with_retry` uses exponential backoff, not a fixed sleep.
+- Fetch retry: `fetch_with_retry` and the DDG search use inline exponential backoff (400 ms to 2 s inside a 60 s window). The crate `backoff` is removed; do not re-add it (unmaintained).
 
 ## Fetch and extraction
 
