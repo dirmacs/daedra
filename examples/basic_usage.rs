@@ -24,6 +24,8 @@ async fn main() -> anyhow::Result<()> {
             region: "wt-wt".to_string(),
             safe_search: SafeSearchLevel::Moderate,
             time_range: None,
+            backends: None,
+            exclude_backends: None,
         }),
     };
 
@@ -57,6 +59,8 @@ async fn main() -> anyhow::Result<()> {
             region: "us-en".to_string(),
             safe_search: SafeSearchLevel::Moderate,
             time_range: Some("m".to_string()), // Last month
+            backends: None,
+            exclude_backends: None,
         }),
     };
 

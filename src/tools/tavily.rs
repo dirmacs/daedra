@@ -50,12 +50,23 @@ impl SearchBackend for TavilyBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "api_key": self.api_key,
             "query": args.query,
             "max_results": opts.num_results,
             "search_depth": "basic",
         });
+        if let Some(tr) = &opts.time_range
+            && let Some(range) = match tr.as_str() {
+                "d" => Some("day"),
+                "w" => Some("week"),
+                "m" => Some("month"),
+                "y" => Some("year"),
+                _ => None,
+            }
+        {
+            body["time_range"] = serde_json::Value::String(range.to_string());
+        }
 
         let resp = self
             .client

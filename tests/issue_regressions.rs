@@ -73,7 +73,9 @@ mod helpers {
 
     pub fn sample_result() -> SearchResult {
         SearchResult {
-            title: "Mock result".to_string(),
+            // Title shares the fixture query's tokens ("search", "query");
+            // the ranked merge discards results that share none.
+            title: "Mock result for search query".to_string(),
             url: "https://example.com/doc".to_string(),
             description: "fixture".to_string(),
             metadata: ResultMetadata {

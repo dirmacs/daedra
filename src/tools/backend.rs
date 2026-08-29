@@ -528,42 +528,79 @@ cuit_note}",
         }
     }
 
-    fn take_next_unseen<'a, I>(
-        queue: &mut std::iter::Peekable<I>,
-        seen: &mut std::collections::HashSet<String>,
-    ) -> Option<crate::types::SearchResult>
-    where
-        I: Iterator<Item = &'a crate::types::SearchResult>,
-    {
-        for r in queue.by_ref() {
-            if seen.insert(r.url.clone()) {
-                return Some(r.clone());
-            }
-        }
-        None
-    }
-
-    fn merge_interleave_results(
+    /// Merge results across sources, best first.
+    ///
+    /// Every result is scored against the query tokens (see
+    /// [`relevance_score`]). Each source's results sort by score, then the
+    /// merge repeatedly takes the highest-scoring next result across all
+    /// sources — a k-way merge, so a weak backend cannot outrank a strong
+    /// one on equal scores, and score ties prefer the earlier backend in the
+    /// fallback-chain order. Results that share no query token score 0 and
+    /// land after every matched result: backends that answered a different
+    /// question than the one asked (RSS feeds that ignore the query) no
+    /// longer outvote backends that correctly returned nothing relevant.
+    fn merge_ranked_results(
         by_source: &[(String, Vec<crate::types::SearchResult>)],
+        query: &str,
         target_count: usize,
     ) -> Vec<crate::types::SearchResult> {
-        let mut merged = Vec::new();
+        let tokens = query_tokens(query);
+        let mut queues: Vec<std::vec::IntoIter<(f64, crate::types::SearchResult)>> = by_source
+            .iter()
+            .map(|(_, results)| {
+                let mut scored: Vec<(f64, crate::types::SearchResult)> = results
+                    .iter()
+                    .map(|r| (relevance_score(r, &tokens), r.clone()))
+                    .collect();
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                scored.into_iter()
+            })
+            .collect();
+
         let mut seen = std::collections::HashSet::new();
-        let mut queues: Vec<_> = by_source.iter().map(|(_, r)| r.iter().peekable()).collect();
+        let mut merged = Vec::with_capacity(target_count);
+        // Start index for tie-breaks: equal best scores rotate across sources
+        // so the merge interleaves them exactly like the old round-robin.
+        let mut rr = 0usize;
 
         while merged.len() < target_count {
-            let mut added = false;
-            for q in &mut queues {
-                if let Some(r) = Self::take_next_unseen(q, &mut seen) {
-                    merged.push(r);
-                    added = true;
+            for q in queues.iter_mut() {
+                while let Some((_, r)) = q.as_slice().first() {
+                    if seen.contains(&r.url) {
+                        q.next();
+                    } else {
+                        break;
+                    }
                 }
-                if merged.len() >= target_count {
+            }
+            let mut best_score = f64::MIN;
+            for q in queues.iter() {
+                if let Some((s, _)) = q.as_slice().first()
+                    && *s > best_score
+                {
+                    best_score = *s;
+                }
+            }
+            if best_score == f64::MIN {
+                break;
+            }
+            let mut picked = None;
+            for off in 0..queues.len() {
+                let i = (rr + off) % queues.len();
+                if queues[i]
+                    .as_slice()
+                    .first()
+                    .is_some_and(|(s, _)| *s == best_score)
+                {
+                    picked = Some(i);
                     break;
                 }
             }
-            if !added {
-                break;
+            let Some(i) = picked else { break };
+            if let Some((_, r)) = queues[i].next() {
+                seen.insert(r.url.clone());
+                merged.push(r);
+                rr = (i + 1) % queues.len();
             }
         }
 
@@ -577,6 +614,24 @@ cuit_note}",
 
         self.rate_limiter.until_ready().await;
 
+        if args.query.trim().is_empty() {
+            return Err(DaedraError::InvalidArguments(
+                "query must not be empty".to_string(),
+            ));
+        }
+        if target_count == 0 {
+            return Err(DaedraError::InvalidArguments(
+                "num_results must be at least 1".to_string(),
+            ));
+        }
+        if let Some(tr) = &opts.time_range
+            && crate::types::time_range_secs(tr).is_none()
+        {
+            return Err(DaedraError::InvalidArguments(format!(
+                "invalid time range {tr:?}: use d, w, m, or y"
+            )));
+        }
+
         let queryable = self.collect_queryable_backends();
         if queryable.is_empty() {
             let open: Vec<String> = self
@@ -589,6 +644,24 @@ cuit_note}",
                 "All search backends have open circuits (cooldown in progress). Open: [{}]",
                 open.join(", ")
             )));
+        }
+
+        let mut queryable = queryable;
+        if let Some(want) = &opts.backends {
+            for w in want {
+                if !self.backends.iter().any(|b| b.name() == w) {
+                    tracing::warn!(backend = %w, "requested backend does not exist");
+                }
+            }
+            queryable.retain(|b| want.iter().any(|w| w == b.name()));
+        }
+        if let Some(excl) = &opts.exclude_backends {
+            queryable.retain(|b| !excl.iter().any(|e| e == b.name()));
+        }
+        if queryable.is_empty() {
+            return Err(DaedraError::InvalidArguments(
+                "no search backends match the backend/exclude selection".to_string(),
+            ));
         }
 
         let results = self.execute_concurrent_queries(&queryable, args).await;
@@ -618,7 +691,23 @@ cuit_note}",
             )));
         }
 
-        let merged = Self::merge_interleave_results(&by_source, target_count);
+        let merged = Self::merge_ranked_results(&by_source, &args.query, target_count);
+
+        // A backend that ignored the query still "wins" when every backend
+        // scored zero. That output is worse than none for an agent — it
+        // looks like an answer. Discard it and say so.
+        let tokens = query_tokens(&args.query);
+        if !tokens.is_empty() && merged.iter().all(|r| relevance_score(r, &tokens) == 0.0) {
+            let tried: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
+            return Err(DaedraError::SearchError(format!(
+                "No search results matched the query {:?}; {} unrelated result(s) from [{}] \
+                 were discarded. Try fewer or different keywords.",
+                args.query,
+                merged.len(),
+                tried.join(", ")
+            )));
+        }
+
         let sources: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
         info!(
             total = merged.len(),
@@ -637,6 +726,100 @@ cuit_note}",
             .map(|b| b.name())
             .collect()
     }
+}
+
+/// Words too common to carry query meaning. Kept deliberately small: a
+/// missed stopword only costs a little precision; a wrongly listed content
+/// word costs recall.
+fn is_stopword(token: &str) -> bool {
+    matches!(
+        token,
+        "the"
+            | "an"
+            | "of"
+            | "in"
+            | "on"
+            | "for"
+            | "to"
+            | "and"
+            | "or"
+            | "is"
+            | "are"
+            | "was"
+            | "were"
+            | "be"
+            | "at"
+            | "by"
+            | "it"
+            | "its"
+            | "with"
+            | "from"
+            | "as"
+            | "that"
+            | "this"
+            | "how"
+            | "what"
+            | "why"
+            | "do"
+            | "does"
+            | "did"
+            | "my"
+            | "me"
+            | "you"
+            | "your"
+            | "he"
+            | "she"
+            | "we"
+            | "they"
+            | "not"
+            | "no"
+            | "de"
+            | "la"
+    )
+}
+
+/// Lowercase significant tokens of a query: alphanumeric runs of length 2+,
+/// stopwords removed.
+fn query_tokens(query: &str) -> Vec<String> {
+    query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 2 && !is_stopword(t))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Share of query tokens present in a result's title, URL, or description.
+/// The URL counts — a domain like `tokio.rs` should match "tokio". An empty
+/// token list scores everything neutral (1.0), which keeps the k-way merge
+/// order equivalent to the old round-robin when the query carries no signal.
+fn relevance_score(r: &crate::types::SearchResult, tokens: &[String]) -> f64 {
+    if tokens.is_empty() {
+        return 1.0;
+    }
+    let title_hay = format!("{} {}", r.title, r.url).to_lowercase();
+    let hay = format!("{title_hay} {}", r.description).to_lowercase();
+    let hits = tokens.iter().filter(|t| hay.contains(t.as_str())).count();
+    let mut score = hits as f64 / tokens.len() as f64;
+    // Full-phrase bonus: the query words in order ("capital ... france" in
+    // "Capital of France") outrank a story that merely contains both words.
+    if tokens_in_order(&title_hay, tokens) {
+        score += 1.0;
+    }
+    score
+}
+
+/// True when every token appears in `hay`, in order, with anything (or
+/// nothing) between them.
+fn tokens_in_order(hay: &str, tokens: &[String]) -> bool {
+    let mut from = 0;
+    for t in tokens {
+        match hay[from..].find(t.as_str()) {
+            Some(p) => from += p + t.len(),
+            None => return false,
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -765,7 +948,9 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_results_basic() {
+    fn test_merge_ranked_interleaves_equal_scores() {
+        // All results score equally against the query, so the k-way merge
+        // degenerates to the old round-robin interleave.
         let a1 = test_search_result("https://a/1", "a1");
         let a2 = test_search_result("https://a/2", "a2");
         let b1 = test_search_result("https://b/1", "b1");
@@ -774,7 +959,7 @@ mod tests {
             ("a".to_string(), vec![a1.clone(), a2.clone()]),
             ("b".to_string(), vec![b1.clone(), b2.clone()]),
         ];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 4);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 4);
         assert_eq!(merged.len(), 4);
         assert_eq!(merged[0].url, "https://a/1");
         assert_eq!(merged[1].url, "https://b/1");
@@ -783,26 +968,81 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_results_dedup() {
+    fn test_merge_ranked_demotes_off_topic_results() {
+        // Backend "rss" answers a different question than the one asked; its
+        // results must land after every matched result.
+        let on_topic_1 = test_search_result("https://tokio.rs/guide", "Tokio runtime guide");
+        let on_topic_2 = test_search_result("https://tokio.rs/tutorial", "Tokio tutorial");
+        let junk_1 = test_search_result("https://betting.example/vn", "Football betting odds");
+        let junk_2 = test_search_result("https://install.example/chrome", "Chrome install");
+        let by_source = vec![
+            ("rss".to_string(), vec![junk_1, junk_2]),
+            ("api".to_string(), vec![on_topic_1, on_topic_2]),
+        ];
+        let merged = SearchProvider::merge_ranked_results(&by_source, "tokio runtime", 4);
+        assert_eq!(merged[0].url, "https://tokio.rs/guide");
+        assert_eq!(merged[1].url, "https://tokio.rs/tutorial");
+        assert_eq!(merged[2].url, "https://betting.example/vn");
+        assert_eq!(merged[3].url, "https://install.example/chrome");
+    }
+
+    #[test]
+    fn test_query_tokens_drops_stopwords_and_short_runs() {
+        let tokens = query_tokens("The capital of France");
+        assert_eq!(tokens, vec!["capital".to_string(), "france".to_string()]);
+        assert!(query_tokens("a of the").is_empty());
+    }
+
+    #[test]
+    fn test_relevance_score_matches_url_and_neutral_empty() {
+        let r = test_search_result("https://tokio.rs/runtime", "Guide");
+        let tokens = query_tokens("tokio");
+        // Token hit (1.0) plus full-phrase bonus in the URL (1.0).
+        assert_eq!(relevance_score(&r, &tokens), 2.0);
+        // No signal at all: neutral score keeps the plain round-robin order.
+        assert_eq!(relevance_score(&r, &[]), 1.0);
+    }
+
+    #[test]
+    fn test_relevance_score_phrase_bonus_breaks_ties() {
+        let wiki = test_search_result(
+            "https://en.wikipedia.org/wiki/Capital_of_France",
+            "Capital of France",
+        );
+        let news = test_search_result(
+            "https://example.test/marseille",
+            "Marseille is France's new capital of overtourism",
+        );
+        let tokens = query_tokens("capital of France");
+        let wiki_score = relevance_score(&wiki, &tokens);
+        let news_score = relevance_score(&news, &tokens);
+        assert!(
+            wiki_score > news_score,
+            "phrase match must outrank word-bag match"
+        );
+    }
+
+    #[test]
+    fn test_merge_ranked_dedup() {
         let shared = test_search_result("https://dup", "dup");
         let other = test_search_result("https://other", "other");
         let by_source = vec![
             ("a".to_string(), vec![shared.clone()]),
             ("b".to_string(), vec![shared, other.clone()]),
         ];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 10);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].url, "https://dup");
         assert_eq!(merged[1].url, "https://other");
     }
 
     #[test]
-    fn test_merge_interleave_results_respects_target() {
+    fn test_merge_ranked_respects_target() {
         let results: Vec<_> = (0..5)
             .map(|i| test_search_result(&format!("https://x/{}", i), &format!("r{}", i)))
             .collect();
         let by_source = vec![("x".to_string(), results)];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 3);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 3);
         assert_eq!(merged.len(), 3);
     }
 
@@ -1080,18 +1320,18 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_results_empty() {
-        let merged = SearchProvider::merge_interleave_results(&[], 10);
+    fn test_merge_ranked_results_empty() {
+        let merged = SearchProvider::merge_ranked_results(&[], "query", 10);
         assert!(merged.is_empty());
     }
 
     #[test]
-    fn test_merge_interleave_results_single_source() {
+    fn test_merge_ranked_results_single_source() {
         let results: Vec<_> = (0..3)
             .map(|i| test_search_result(&format!("https://only/{}", i), &format!("r{}", i)))
             .collect();
         let by_source = vec![("only".to_string(), results.clone())];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 10);
         assert_eq!(merged.len(), 3);
         assert_eq!(merged[0].url, "https://only/0");
         assert_eq!(merged[1].url, "https://only/1");
@@ -1099,32 +1339,32 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_results_multiple_sources() {
+    fn test_merge_ranked_results_multiple_sources() {
         let a1 = test_search_result("https://a/1", "a1");
         let b1 = test_search_result("https://b/1", "b1");
         let by_source = vec![
             ("a".to_string(), vec![a1.clone()]),
             ("b".to_string(), vec![b1.clone()]),
         ];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 2);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 2);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].url, "https://a/1");
         assert_eq!(merged[1].url, "https://b/1");
     }
 
     #[test]
-    fn test_merge_interleave_empty_sources() {
-        let merged = SearchProvider::merge_interleave_results(&[], 10);
+    fn test_merge_ranked_empty_sources() {
+        let merged = SearchProvider::merge_ranked_results(&[], "query", 10);
         assert!(merged.is_empty());
     }
 
     #[test]
-    fn test_merge_interleave_single_source() {
+    fn test_merge_ranked_single_source() {
         let results: Vec<_> = (0..3)
             .map(|i| test_search_result(&format!("https://only/{}", i), &format!("r{}", i)))
             .collect();
         let by_source = vec![("only".to_string(), results)];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 10);
         assert_eq!(merged.len(), 3);
         assert_eq!(merged[0].url, "https://only/0");
         assert_eq!(merged[1].url, "https://only/1");
@@ -1132,13 +1372,13 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_uneven_sources() {
+    fn test_merge_ranked_uneven_sources() {
         let a: Vec<_> = (0..3)
             .map(|i| test_search_result(&format!("https://a/{}", i), &format!("a{}", i)))
             .collect();
         let b = vec![test_search_result("https://b/0", "b0")];
         let by_source = vec![("a".to_string(), a), ("b".to_string(), b)];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 10);
         assert_eq!(merged.len(), 4);
         assert_eq!(merged[0].url, "https://a/0");
         assert_eq!(merged[1].url, "https://b/0");
@@ -1147,22 +1387,22 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_interleave_all_duplicates() {
+    fn test_merge_ranked_all_duplicates() {
         let dup = test_search_result("https://dup", "dup");
         let by_source = vec![
             ("a".to_string(), vec![dup.clone()]),
             ("b".to_string(), vec![dup]),
         ];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 10);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 10);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].url, "https://dup");
     }
 
     #[test]
-    fn test_merge_interleave_target_zero() {
+    fn test_merge_ranked_target_zero() {
         let results = vec![test_search_result("https://x/0", "r0")];
         let by_source = vec![("x".to_string(), results)];
-        let merged = SearchProvider::merge_interleave_results(&by_source, 0);
+        let merged = SearchProvider::merge_ranked_results(&by_source, "query", 0);
         assert!(merged.is_empty());
     }
 
