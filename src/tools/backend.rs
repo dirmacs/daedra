@@ -130,6 +130,16 @@ pub trait SearchBackend: Send + Sync {
     }
 }
 
+/// Outcome of aggregating per-backend results: grouped successful results,
+/// whether any backend succeeded, every tried backend name, and per-backend
+/// failures (name, error) for aggregate error reporting.
+type CategorizedResults = (
+    Vec<(String, Vec<crate::types::SearchResult>)>,
+    bool,
+    Vec<String>,
+    Vec<(String, String)>,
+);
+
 /// Multi-backend search provider with automatic fallback.
 ///
 /// Tries backends in priority order. If the primary fails,
@@ -430,13 +440,10 @@ impl SearchProvider {
 
     fn categorize_results(
         results: Vec<(String, DaedraResult<SearchResponse>)>,
-    ) -> (
-        Vec<(String, Vec<crate::types::SearchResult>)>,
-        bool,
-        Vec<String>,
-    ) {
+    ) -> CategorizedResults {
         let tried: Vec<String> = results.iter().map(|(name, _)| name.clone()).collect();
         let mut by_source: Vec<(String, Vec<crate::types::SearchResult>)> = Vec::new();
+        let mut failures: Vec<(String, String)> = Vec::new();
         let mut any_success = false;
 
         for (name, result) in results {
@@ -461,11 +468,58 @@ impl SearchProvider {
                 Ok(_) => {},
                 Err(e) => {
                     warn!(backend = %name, error = %e, "Backend failed");
+                    failures.push((name, e.to_string()));
                 },
             }
         }
 
-        (by_source, any_success, tried)
+        (by_source, any_success, tried, failures)
+    }
+
+    /// Build the aggregate-failure error message, distinguishing backends that
+    /// errored from backends that legitimately returned zero results (they have
+    /// different remediations: errors mean rate limits/CAPTCHAs/breakers; empty
+    /// means the query has no matches on that backend's index).
+    fn aggregate_failure_message(
+        tried: &[String],
+        failures: &[(String, String)],
+        empty: &[String],
+        open_circuits: &[String],
+    ) -> String {
+        let circuit_note = if open_circuits.is_empty() {
+            String::new()
+        } else {
+            format!("; open circuits: [{}]", open_circuits.join(", "))
+        };
+        let errors = failures
+            .iter()
+            .map(|(n, e)| format!("{n}: {e}"))
+            .collect::<Vec<_>>()
+            .join("; ");
+        match (failures.is_empty(), empty.is_empty()) {
+            (false, true) => format!(
+                "All {} search backends failed (tried: {}); errors: [{}{}]",
+                tried.len(),
+                tried.join(", "),
+                errors,
+                circuit_note
+            ),
+            (true, false) => format!(
+                "All {} search backends returned 0 results (tried: {}){}",
+                tried.len(),
+                tried.join(", "),
+                circuit_note
+            ),
+            _ => format!(
+                "All {} search backends returned no usable results (tried: {}); failed: [{}]; empty: [{}]{cir\
+cuit_note}",
+                tried.len(),
+                tried.join(", "),
+                errors,
+                empty.join(", "),
+                circuit_note = circuit_note
+            ),
+        }
     }
 
     fn take_next_unseen<'a, I>(
@@ -532,7 +586,7 @@ impl SearchProvider {
         }
 
         let results = self.execute_concurrent_queries(&queryable, args).await;
-        let (by_source, any_success, tried) = Self::categorize_results(results);
+        let (by_source, any_success, tried, failures) = Self::categorize_results(results);
 
         if !any_success {
             let open_circuits: Vec<String> = self
@@ -541,16 +595,20 @@ impl SearchProvider {
                 .filter(|(name, h)| tried.contains(name) && !h.is_available())
                 .map(|(name, _)| name.clone())
                 .collect();
-            let circuit_note = if open_circuits.is_empty() {
-                String::new()
-            } else {
-                format!("; open circuits: [{}]", open_circuits.join(", "))
-            };
-            return Err(DaedraError::SearchError(format!(
-                "All {} search backends returned 0 results (tried: {}){}",
-                tried.len(),
-                tried.join(", "),
-                circuit_note
+            let succeeded: std::collections::HashSet<&str> =
+                by_source.iter().map(|(n, _)| n.as_str()).collect();
+            let failed: std::collections::HashSet<&str> =
+                failures.iter().map(|(n, _)| n.as_str()).collect();
+            let empty: Vec<String> = tried
+                .iter()
+                .filter(|n| !succeeded.contains(n.as_str()) && !failed.contains(n.as_str()))
+                .cloned()
+                .collect();
+            return Err(DaedraError::SearchError(Self::aggregate_failure_message(
+                &tried,
+                &failures,
+                &empty,
+                &open_circuits,
             )));
         }
 
@@ -776,10 +834,56 @@ mod tests {
             )
         };
         let results = vec![ok("a", "https://a"), ok("b", "https://b")];
-        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        let (by_source, any_success, tried, failures) = SearchProvider::categorize_results(results);
         assert!(any_success);
         assert_eq!(tried.len(), 2);
         assert_eq!(by_source.len(), 2);
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn test_aggregate_failure_message_all_errors() {
+        let tried = vec!["bing".to_string(), "wikipedia".to_string()];
+        let failures = vec![
+            ("bing".to_string(), "rate limit exceeded".to_string()),
+            ("wikipedia".to_string(), "HTTP status 503".to_string()),
+        ];
+        let msg = SearchProvider::aggregate_failure_message(&tried, &failures, &[], &[]);
+        assert!(msg.contains("2 search backends failed"), "{msg}");
+        assert!(msg.contains("bing: rate limit exceeded"), "{msg}");
+        assert!(msg.contains("wikipedia: HTTP status 503"), "{msg}");
+        assert!(!msg.contains("returned 0 results"), "{msg}");
+    }
+
+    #[test]
+    fn test_aggregate_failure_message_all_empty() {
+        let tried = vec!["wikipedia".to_string(), "github".to_string()];
+        let msg = SearchProvider::aggregate_failure_message(&tried, &[], &tried.clone(), &[]);
+        assert!(
+            msg.contains("All 2 search backends returned 0 results"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_failure_message_mixed() {
+        let tried = vec![
+            "bing".to_string(),
+            "wikipedia".to_string(),
+            "wiby".to_string(),
+        ];
+        let failures = vec![("bing".to_string(), "CAPTCHA".to_string())];
+        let empty = vec!["wiby".to_string()];
+        let msg = SearchProvider::aggregate_failure_message(
+            &tried,
+            &failures,
+            &empty,
+            &["bing".to_string()],
+        );
+        assert!(msg.contains("returned no usable results"), "{msg}");
+        assert!(msg.contains("failed: [bing: CAPTCHA]"), "{msg}");
+        assert!(msg.contains("empty: [wiby]"), "{msg}");
+        assert!(msg.contains("open circuits: [bing]"), "{msg}");
     }
 
     #[test]
@@ -794,10 +898,17 @@ mod tests {
                 Err(DaedraError::SearchError("fail b".to_string())),
             ),
         ];
-        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        let (by_source, any_success, tried, failures) = SearchProvider::categorize_results(results);
         assert!(!any_success);
         assert_eq!(tried.len(), 2);
         assert!(by_source.is_empty());
+        assert_eq!(
+            failures,
+            vec![
+                ("a".to_string(), "Search failed: fail a".to_string()),
+                ("b".to_string(), "Search failed: fail b".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -818,11 +929,13 @@ mod tests {
                 Err(DaedraError::SearchError("fail".to_string())),
             ),
         ];
-        let (by_source, any_success, tried) = SearchProvider::categorize_results(results);
+        let (by_source, any_success, tried, failures) = SearchProvider::categorize_results(results);
         assert!(any_success);
         assert_eq!(tried.len(), 2);
         assert_eq!(by_source.len(), 1);
         assert_eq!(by_source[0].0, "ok");
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, "fail");
     }
 
     #[tokio::test]

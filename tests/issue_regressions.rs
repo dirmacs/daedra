@@ -307,8 +307,13 @@ mod issue_7 {
         match &results[2] {
             Err(DaedraError::SearchError(msg)) => {
                 assert!(
-                    msg.contains("search backends returned 0 results"),
-                    "unexpected message: {msg}"
+                    msg.contains("All search backends failed")
+                        || msg.contains("search backends returned 0 results"),
+                    "aggregate failure must say which backends failed, got: {msg}"
+                );
+                assert!(
+                    msg.contains(':'),
+                    "aggregate failure must include per-backend error detail, got: {msg}"
                 );
             },
             other => panic!("expected SearchError, got {other:?}"),
