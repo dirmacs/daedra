@@ -421,8 +421,12 @@ pub struct CrawlArgs {
     pub concurrency: usize,
 }
 
-fn default_crawl_max_pages() -> usize { 25 }
-fn default_crawl_concurrency() -> usize { 4 }
+fn default_crawl_max_pages() -> usize {
+    25
+}
+fn default_crawl_concurrency() -> usize {
+    4
+}
 
 /// A single page fetched by `crawl_site`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -755,11 +759,13 @@ mod tests {
             },
         }];
         let response = SearchResponse::new("rust".to_string(), results, &SearchOptions::default());
-        assert!(response
-            .metadata
-            .query_analysis
-            .topics
-            .contains(&"technology".to_string()));
+        assert!(
+            response
+                .metadata
+                .query_analysis
+                .topics
+                .contains(&"technology".to_string())
+        );
     }
 
     #[test]
@@ -806,10 +812,20 @@ mod tests {
         assert_eq!(round_trip.title, page.title);
         assert_eq!(round_trip.content, page.content);
         assert_eq!(round_trip.word_count, page.word_count);
-        assert_eq!(round_trip.links.as_ref().map(|v| v.len()), page.links.as_ref().map(|v| v.len()));
         assert_eq!(
-            round_trip.links.as_ref().and_then(|v| v.first()).map(|l| l.url.as_str()),
-            page.links.as_ref().and_then(|v| v.first()).map(|l| l.url.as_str())
+            round_trip.links.as_ref().map(|v| v.len()),
+            page.links.as_ref().map(|v| v.len())
+        );
+        assert_eq!(
+            round_trip
+                .links
+                .as_ref()
+                .and_then(|v| v.first())
+                .map(|l| l.url.as_str()),
+            page.links
+                .as_ref()
+                .and_then(|v| v.first())
+                .map(|l| l.url.as_str())
         );
     }
 }

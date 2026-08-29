@@ -60,14 +60,12 @@ impl SearchBackend for GitHubBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let mut req = self.client
-            .get(GITHUB_API)
-            .query(&[
-                ("q", args.query.as_str()),
-                ("per_page", &opts.num_results.min(30).to_string()),
-                ("sort", "stars"),
-                ("order", "desc"),
-            ]);
+        let mut req = self.client.get(GITHUB_API).query(&[
+            ("q", args.query.as_str()),
+            ("per_page", &opts.num_results.min(30).to_string()),
+            ("sort", "stars"),
+            ("order", "desc"),
+        ]);
 
         if let Some(ref token) = self.token {
             req = req.header("Authorization", format!("Bearer {}", token));
@@ -76,14 +74,17 @@ impl SearchBackend for GitHubBackend {
         let resp = req.send().await.map_err(DaedraError::HttpError)?;
 
         if !resp.status().is_success() {
-            return Err(DaedraError::SearchError(
-                format!("GitHub API returned {}", resp.status()),
-            ));
+            return Err(DaedraError::SearchError(format!(
+                "GitHub API returned {}",
+                resp.status()
+            )));
         }
 
         let data: GhResponse = resp.json().await.map_err(DaedraError::HttpError)?;
 
-        let results: Vec<SearchResult> = data.items.unwrap_or_default()
+        let results: Vec<SearchResult> = data
+            .items
+            .unwrap_or_default()
             .into_iter()
             .map(|r| {
                 let desc = format!(
@@ -107,11 +108,17 @@ impl SearchBackend for GitHubBackend {
             .take(opts.num_results)
             .collect();
 
-        info!(backend = "github", results = results.len(), "GitHub search complete");
+        info!(
+            backend = "github",
+            results = results.len(),
+            "GitHub search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "github" }
+    fn name(&self) -> &str {
+        "github"
+    }
 }
 
 #[cfg(test)]

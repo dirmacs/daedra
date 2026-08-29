@@ -178,7 +178,6 @@ impl From<SafeSearchOption> for SafeSearchLevel {
     }
 }
 
-
 #[cfg(test)]
 fn safe_search_from_u8(v: u8) -> Option<SafeSearchLevel> {
     match v {
@@ -192,9 +191,11 @@ fn safe_search_from_u8(v: u8) -> Option<SafeSearchLevel> {
 fn check_section_message(title: &str) -> String {
     match title {
         "Configuration Check" => "
-Checking Daedra configuration...".to_string(),
+Checking Daedra configuration..."
+            .to_string(),
         "Connectivity Test" => "
-Testing search functionality...".to_string(),
+Testing search functionality..."
+            .to_string(),
         _ => title.to_string(),
     }
 }
@@ -366,11 +367,11 @@ fn check_search_client(reporter: &CheckReporter) -> bool {
         Ok(_) => {
             reporter.ok("Search client initialized");
             true
-        }
+        },
         Err(e) => {
             reporter.fail(&format!("Search client: {e}"));
             false
-        }
+        },
     }
 }
 
@@ -379,11 +380,11 @@ fn check_fetch_client(reporter: &CheckReporter) -> bool {
         Ok(_) => {
             reporter.ok("Fetch client initialized");
             true
-        }
+        },
         Err(e) => {
             reporter.fail(&format!("Fetch client: {e}"));
             false
-        }
+        },
     }
 }
 
@@ -408,11 +409,11 @@ async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
                 reporter.ok("Search connectivity verified");
             }
             true
-        }
+        },
         Err(e) => {
             reporter.fail(&format!("Search test: {e}"));
             false
-        }
+        },
     }
 }
 
@@ -543,7 +544,6 @@ async fn run_serve(
     server.run(transport_type).await
 }
 
-
 fn format_page_header(title: &str, no_color: bool) -> String {
     if no_color {
         format!("\n{}\n{}", title, "=".repeat(50))
@@ -642,7 +642,10 @@ fn format_page_content_pretty(content: &PageContent, no_color: bool) -> String {
 }
 
 fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
-    print!("{}", format_search_header_pretty(query, count, region, no_color));
+    print!(
+        "{}",
+        format_search_header_pretty(query, count, region, no_color)
+    );
 }
 
 fn print_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) {
@@ -718,7 +721,6 @@ async fn run_search(
     Ok(())
 }
 
-
 async fn run_fetch(
     url: String,
     selector: Option<String>,
@@ -743,7 +745,6 @@ async fn run_fetch(
     Ok(())
 }
 
-
 async fn run_crawl(
     url: String,
     max_pages: usize,
@@ -767,7 +768,6 @@ async fn run_crawl(
 
     Ok(())
 }
-
 
 fn run_info(no_color: bool) {
     if no_color {
@@ -1068,4 +1068,3 @@ Testing search functionality..."
         assert!(result.is_ok());
     }
 }
-

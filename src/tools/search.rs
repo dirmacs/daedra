@@ -372,7 +372,9 @@ impl SearchBackend for SearchClient {
         self.search(args).await
     }
 
-    fn name(&self) -> &str { "duckduckgo" }
+    fn name(&self) -> &str {
+        "duckduckgo"
+    }
 }
 
 #[cfg(test)]
@@ -509,7 +511,9 @@ mod tests {
     #[test]
     fn test_parse_search_results_empty_html() {
         let client = SearchClient::new().unwrap();
-        let results = client.parse_search_results("<html><body></body></html>", 10).unwrap();
+        let results = client
+            .parse_search_results("<html><body></body></html>", 10)
+            .unwrap();
         assert!(results.is_empty());
     }
 

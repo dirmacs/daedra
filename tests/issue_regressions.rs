@@ -106,9 +106,7 @@ mod helpers {
         let bad = bytes
             .iter()
             .filter(|&&b| {
-                b == 0
-                    || (b < 0x20 && b != b'\n' && b != b'\r' && b != b'\t')
-                    || b == 0x7f
+                b == 0 || (b < 0x20 && b != b'\n' && b != b'\r' && b != b'\t') || b == 0x7f
             })
             .count();
         bad as f64 / bytes.len() as f64
@@ -187,7 +185,9 @@ mod issue_6 {
             CELIACHIA_ARTICLE_MARKER
         );
         assert!(
-            page.content.to_lowercase().contains("alimentazione fuori casa"),
+            page.content
+                .to_lowercase()
+                .contains("alimentazione fuori casa"),
             "expected AFC article vocabulary in extracted markdown"
         );
     }
@@ -203,7 +203,11 @@ mod issue_6 {
             include_images: false,
         };
         let page = client.fetch(&args).await.expect("live fetch");
-        assert!(page.word_count < 50, "live issue #6: got {} words", page.word_count);
+        assert!(
+            page.word_count < 50,
+            "live issue #6: got {} words",
+            page.word_count
+        );
     }
 
     #[tokio::test]
@@ -306,7 +310,7 @@ mod issue_7 {
                     msg.contains("search backends returned 0 results"),
                     "unexpected message: {msg}"
                 );
-            }
+            },
             other => panic!("expected SearchError, got {other:?}"),
         }
     }
@@ -465,8 +469,8 @@ mod issue_8 {
 // Google HTML backend must parse SERPs and fail fast on CAPTCHAs.
 mod issue9 {
     use super::*;
-    use daedra::tools::google::{safe_param, GoogleBackend};
-    use daedra::types::{region_to_gl_hl, region_to_mkt, SafeSearchLevel, SearchOptions};
+    use daedra::tools::google::{GoogleBackend, safe_param};
+    use daedra::types::{SafeSearchLevel, SearchOptions, region_to_gl_hl, region_to_mkt};
 
     #[test]
     fn issue9_safesearch_mappers_cover_every_level() {
@@ -531,7 +535,10 @@ mod issue9 {
             query: "rust".into(),
             options: Some(SearchOptions::default()),
         };
-        let err = backend.search(&args).await.expect_err("CAPTCHA must fail fast");
+        let err = backend
+            .search(&args)
+            .await
+            .expect_err("CAPTCHA must fail fast");
         assert!(
             matches!(err, daedra::types::DaedraError::BotProtectionDetected),
             "expected BotProtectionDetected, got {err:?}"

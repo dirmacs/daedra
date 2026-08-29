@@ -6,7 +6,7 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraResult, DaedraError, ResultMetadata, SearchArgs, SearchResponse,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
     SearchResult,
 };
 use async_trait::async_trait;
@@ -106,7 +106,8 @@ impl SearchBackend for DdgInstantBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(DDG_API)
             .query(&[
                 ("q", args.query.as_str()),
@@ -135,11 +136,17 @@ impl SearchBackend for DdgInstantBackend {
             }
         }
 
-        info!(backend = "ddg-instant", results = results.len(), "DDG Instant Answers complete");
+        info!(
+            backend = "ddg-instant",
+            results = results.len(),
+            "DDG Instant Answers complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "ddg-instant" }
+    fn name(&self) -> &str {
+        "ddg-instant"
+    }
 }
 
 #[cfg(test)]
@@ -171,7 +178,10 @@ mod tests {
         let result = abstract_to_result(&data).unwrap();
         assert_eq!(result.title, "Rust (programming language)");
         assert_eq!(result.url, "https://example.com/rust");
-        assert_eq!(result.description, "Rust is a systems programming language.");
+        assert_eq!(
+            result.description,
+            "Rust is a systems programming language."
+        );
     }
 
     #[test]
@@ -216,7 +226,10 @@ mod tests {
     #[test]
     fn test_ddg_response_deserialize() {
         let data = sample_ddg_response();
-        assert_eq!(data.abstract_text, "Rust is a systems programming language.");
+        assert_eq!(
+            data.abstract_text,
+            "Rust is a systems programming language."
+        );
         assert_eq!(data.abstract_url, "https://example.com/rust");
         assert_eq!(data.heading, "Rust (programming language)");
         assert_eq!(data.related_topics.len(), 1);

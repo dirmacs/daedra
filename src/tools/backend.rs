@@ -8,8 +8,8 @@
 
 use crate::types::{DaedraError, DaedraResult, SearchArgs, SearchResponse};
 use async_trait::async_trait;
-use backoff::backoff::Backoff;
 use backoff::ExponentialBackoff;
+use backoff::backoff::Backoff;
 use governor::{DefaultDirectRateLimiter, DefaultKeyedRateLimiter, Quota, RateLimiter};
 use std::collections::HashMap;
 use std::num::NonZeroU32;
@@ -88,7 +88,6 @@ impl BackendRateLimiters {
         )
     }
 
-
     /// API backends (serper, tavily): 2 req / s sustained, burst 2.
     fn api_limiter() -> DefaultKeyedRateLimiter<String> {
         RateLimiter::dashmap(Quota::per_second(NonZeroU32::new(2).unwrap()))
@@ -99,11 +98,7 @@ impl BackendRateLimiters {
         RateLimiter::dashmap(Quota::per_second(NonZeroU32::new(2).unwrap()))
     }
 
-    async fn until_ready(
-        &self,
-        name: &str,
-        scraper_default: &DefaultKeyedRateLimiter<String>,
-    ) {
+    async fn until_ready(&self, name: &str, scraper_default: &DefaultKeyedRateLimiter<String>) {
         let key = name.to_string();
         match name {
             // Scraper backends use the moderate default keyed limiter on SearchProvider.
@@ -162,7 +157,9 @@ impl SearchProvider {
         BackendRateLimiters::default_limiter()
     }
 
-    fn init_circuit_breakers(backends: &[Box<dyn SearchBackend>]) -> HashMap<String, Arc<BackendHealth>> {
+    fn init_circuit_breakers(
+        backends: &[Box<dyn SearchBackend>],
+    ) -> HashMap<String, Arc<BackendHealth>> {
         backends
             .iter()
             .map(|b| {
@@ -196,17 +193,19 @@ impl SearchProvider {
 
         // Serper (Google results) — if API key is set
         if let Ok(key) = std::env::var("SERPER_API_KEY")
-            && !key.is_empty() {
-                info!("Serper backend enabled (SERPER_API_KEY set)");
-                backends.push(Box::new(super::serper::SerperBackend::new(key)));
-            }
+            && !key.is_empty()
+        {
+            info!("Serper backend enabled (SERPER_API_KEY set)");
+            backends.push(Box::new(super::serper::SerperBackend::new(key)));
+        }
 
         // Tavily — if API key is set
         if let Ok(key) = std::env::var("TAVILY_API_KEY")
-            && !key.is_empty() {
-                info!("Tavily backend enabled (TAVILY_API_KEY set)");
-                backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
-            }
+            && !key.is_empty()
+        {
+            info!("Tavily backend enabled (TAVILY_API_KEY set)");
+            backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
+        }
 
         // Bing HTML scraping — no API key, but often CAPTCHA-blocked from datacenter IPs
         info!("Bing backend enabled (no API key, may be blocked from datacenter IPs)");
@@ -243,12 +242,7 @@ impl SearchProvider {
         Self::from_backends(backends)
     }
 
-    const NON_RETRYABLE_SUBSTRINGS: &[&str] = &[
-        "403",
-        "captcha",
-        "bot protection",
-        "bot detected",
-    ];
+    const NON_RETRYABLE_SUBSTRINGS: &[&str] = &["403", "captcha", "bot protection", "bot detected"];
 
     fn is_non_retryable(err: &DaedraError) -> bool {
         match err {
@@ -256,7 +250,7 @@ impl SearchProvider {
             DaedraError::SearchError(msg) => {
                 let m = msg.to_lowercase();
                 Self::NON_RETRYABLE_SUBSTRINGS.iter().any(|s| m.contains(s))
-            }
+            },
             _ => false,
         }
     }
@@ -269,11 +263,10 @@ impl SearchProvider {
             DaedraError::SearchError(msg) => {
                 let m = msg.to_lowercase();
                 Self::TRANSIENT_SUBSTRINGS.iter().any(|s| m.contains(s))
-            }
+            },
             _ => false,
         }
     }
-
 
     fn record_health_outcome(health: &Option<Arc<BackendHealth>>, success: bool) {
         if let Some(h) = health {
@@ -291,9 +284,10 @@ impl SearchProvider {
         health: Option<Arc<BackendHealth>>,
     ) -> (String, DaedraResult<SearchResponse>) {
         if let Ok(r) = &result
-            && !r.data.is_empty() {
-                Self::record_health_outcome(&health, true);
-            }
+            && !r.data.is_empty()
+        {
+            Self::record_health_outcome(&health, true);
+        }
         (name, result)
     }
 
@@ -337,9 +331,9 @@ impl SearchProvider {
             Ok(r) if !r.data.is_empty() => Self::record_health_outcome(&health, true),
             Err(retry_err) if Self::is_non_retryable(retry_err) => {
                 Self::record_health_outcome(&health, false);
-            }
+            },
             Err(_) => Self::record_health_outcome(&health, false),
-            _ => {}
+            _ => {},
         }
         (name, retry_result)
     }
@@ -368,16 +362,17 @@ impl SearchProvider {
         limiters.until_ready(&name, scraper_default).await;
 
         if let Some(h) = &health
-            && !h.is_available() {
-                info!(backend = %name, "Circuit open, skipping");
-                return (
-                    name.clone(),
-                    Err(DaedraError::SearchError(format!(
-                        "Backend {} circuit open",
-                        name
-                    ))),
-                );
-            }
+            && !h.is_available()
+        {
+            info!(backend = %name, "Circuit open, skipping");
+            return (
+                name.clone(),
+                Err(DaedraError::SearchError(format!(
+                    "Backend {} circuit open",
+                    name
+                ))),
+            );
+        }
 
         info!(backend = %name, query = %args.query, "Querying backend");
         let result = b.search(args).await;
@@ -396,7 +391,7 @@ impl SearchProvider {
                     scraper_default,
                 )
                 .await
-            }
+            },
             Err(_) => Self::handle_unrecoverable_error(name, result, health),
         }
     }
@@ -427,9 +422,7 @@ impl SearchProvider {
                 let a = args.clone();
                 let health = self.circuit_breakers.get(b.name()).cloned();
                 let limiters = Arc::clone(&limiters);
-                async move {
-                    Self::query_backend(*b, &a, health, &limiters, scraper_default).await
-                }
+                async move { Self::query_backend(*b, &a, health, &limiters, scraper_default).await }
             })
             .collect();
         futures::future::join_all(futures).await
@@ -464,11 +457,11 @@ impl SearchProvider {
                 Ok(response) if !response.data.is_empty() => {
                     any_success = true;
                     by_source.push((name, response.data));
-                }
-                Ok(_) => {}
+                },
+                Ok(_) => {},
                 Err(e) => {
                     warn!(backend = %name, error = %e, "Backend failed");
-                }
+                },
             }
         }
 
@@ -625,7 +618,6 @@ mod tests {
         assert!(health.is_available());
     }
 
-
     #[test]
     fn test_circuit_breaker_half_open() {
         let health = BackendHealth::new(3, Duration::from_millis(50));
@@ -675,13 +667,8 @@ mod tests {
     #[tokio::test]
     async fn test_is_transient() {
         let client = reqwest::Client::new();
-        let http_err = DaedraError::HttpError(
-            client
-                .get("http://127.0.0.1:1")
-                .send()
-                .await
-                .unwrap_err(),
-        );
+        let http_err =
+            DaedraError::HttpError(client.get("http://127.0.0.1:1").send().await.unwrap_err());
         assert!(SearchProvider::is_transient(&http_err));
         assert!(SearchProvider::is_transient(&DaedraError::Timeout));
         assert!(!SearchProvider::is_transient(&DaedraError::SearchError(
@@ -769,9 +756,9 @@ mod tests {
             );
         }
         assert!(!SearchProvider::is_non_retryable(&DaedraError::Timeout));
-        assert!(!SearchProvider::is_non_retryable(&DaedraError::SearchError(
-            "connection reset".to_string()
-        )));
+        assert!(!SearchProvider::is_non_retryable(
+            &DaedraError::SearchError("connection reset".to_string())
+        ));
     }
 
     #[test]
@@ -890,9 +877,7 @@ mod tests {
     #[async_trait]
     impl SearchBackend for TransientThenOkBackend {
         async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
-            let n = self
-                .calls
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if n == 0 {
                 return Err(DaedraError::Timeout);
             }
@@ -942,8 +927,11 @@ mod tests {
             vec![test_search_result("https://ok", "ok")],
             &opts,
         ));
-        let (_name, _) =
-            SearchProvider::handle_successful_result("backend".to_string(), ok, Some(health.clone()));
+        let (_name, _) = SearchProvider::handle_successful_result(
+            "backend".to_string(),
+            ok,
+            Some(health.clone()),
+        );
         assert!(health.is_available());
     }
 
@@ -1089,5 +1077,4 @@ mod tests {
         assert!(!result.unwrap().data.is_empty());
         assert!(health.is_available());
     }
-
 }

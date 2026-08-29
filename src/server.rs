@@ -4,7 +4,7 @@
 //! tool requests and manages communication via STDIO or SSE transports.
 
 use crate::cache::{CacheConfig, SearchCache};
-use crate::tools::{self, fetch, crawl_site};
+use crate::tools::{self, crawl_site, fetch};
 use crate::types::{
     CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult,
     VisitPageArgs, crawl_args_schema, search_args_schema, visit_page_args_schema,
@@ -259,7 +259,6 @@ impl DaedraHandler {
         Ok(response)
     }
 
-
     /// Fetch page snippets for sparse top results (description < 100 chars).
     async fn enrich_sparse_results(&self, results: &mut [SearchResult], count: usize) {
         let enrich_count = count.min(results.len());
@@ -292,7 +291,7 @@ impl DaedraHandler {
                         Ok(Ok(page)) => {
                             let snippet: String = page.content.chars().take(300).collect();
                             Some((url, snippet))
-                        }
+                        },
                         _ => None,
                     }
                 }
@@ -302,9 +301,10 @@ impl DaedraHandler {
         let enrichments = futures::future::join_all(futures).await;
         for enrichment in enrichments.into_iter().flatten() {
             if let Some(result) = results.iter_mut().find(|r| r.url == enrichment.0)
-                && result.description.len() < 100 {
-                    result.description = enrichment.1;
-                }
+                && result.description.len() < 100
+            {
+                result.description = enrichment.1;
+            }
         }
     }
 
@@ -361,11 +361,7 @@ impl DaedraHandler {
                 Err(resp) => resp,
             },
             "ping" => JsonRpcResponse::success(id, json!({})),
-            _ => JsonRpcResponse::error(
-                id,
-                -32601,
-                format!("Method not found: {}", method),
-            ),
+            _ => JsonRpcResponse::error(id, -32601, format!("Method not found: {}", method)),
         }
     }
 
@@ -385,11 +381,11 @@ impl DaedraHandler {
             Ok(response) => {
                 let text = serde_json::to_string_pretty(&response).unwrap_or_default();
                 tool_success_response(id, text)
-            }
+            },
             Err(e) => {
                 error!(error = %e, "Search failed");
                 tool_error_response(id, &format!("Search failed: {}", e))
-            }
+            },
         }
     }
 
@@ -414,7 +410,7 @@ impl DaedraHandler {
             Err(e) => {
                 error!(error = %e, "Fetch failed");
                 tool_error_response(id, &format!("Failed to fetch page: {}", e))
-            }
+            },
         }
     }
 
@@ -434,11 +430,11 @@ impl DaedraHandler {
             Ok(result) => {
                 let text = serde_json::to_string_pretty(&result).unwrap_or_default();
                 tool_success_response(id, text)
-            }
+            },
             Err(e) => {
                 error!(error = %e, "Crawl failed");
                 tool_error_response(id, &format!("Crawl failed: {}", e))
-            }
+            },
         }
     }
 
@@ -475,7 +471,7 @@ fn parse_tool_call_params(
                 -32602,
                 "Missing parameters".to_string(),
             ));
-        }
+        },
     };
     let tool_name = params
         .get("name")
@@ -537,7 +533,7 @@ async fn process_stdio_line(line: &str, handler: &DaedraHandler) -> Option<JsonR
                 -32700,
                 format!("Parse error: {}", e),
             ));
-        }
+        },
     };
 
     let response = handler.handle_request(request.clone()).await;
@@ -556,8 +552,12 @@ async fn write_stdio_response(
     let response_str = serde_json::to_string(&response).unwrap();
     debug!(response = %response_str, "Sending response");
     stdout.write_all(response_str.as_bytes()).await?;
-    stdout.write_all(b"
-").await?;
+    stdout
+        .write_all(
+            b"
+",
+        )
+        .await?;
     stdout.flush().await
 }
 
@@ -1021,7 +1021,9 @@ mod tests {
     #[tokio::test]
     async fn test_handle_method_tools_list() {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
-        let response = handler.handle_method("tools/list", Some(json!(1)), None).await;
+        let response = handler
+            .handle_method("tools/list", Some(json!(1)), None)
+            .await;
         assert!(response.result.is_some());
         let result = response.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
@@ -1040,7 +1042,9 @@ mod tests {
     #[tokio::test]
     async fn test_handle_method_initialized() {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
-        let response = handler.handle_method("initialized", Some(json!(1)), None).await;
+        let response = handler
+            .handle_method("initialized", Some(json!(1)), None)
+            .await;
         assert!(response.error.is_none());
         assert_eq!(response.result.unwrap(), json!({}));
     }
@@ -1124,8 +1128,16 @@ mod tests {
         };
         let first = handler.execute_search(args.clone()).await;
         let second = handler.execute_search(args).await;
-        assert!(first.is_ok(), "first search should succeed: {:?}", first.err());
-        assert!(second.is_ok(), "second search should succeed: {:?}", second.err());
+        assert!(
+            first.is_ok(),
+            "first search should succeed: {:?}",
+            first.err()
+        );
+        assert!(
+            second.is_ok(),
+            "second search should succeed: {:?}",
+            second.err()
+        );
         assert!(!first.unwrap().data.is_empty());
         assert!(!second.unwrap().data.is_empty());
     }
@@ -1285,10 +1297,7 @@ mod tests {
     async fn test_handle_visit_page_valid_url() {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
         let response = handler
-            .handle_visit_page(
-                Some(json!(1)),
-                json!({"url": "https://example.com"}),
-            )
+            .handle_visit_page(Some(json!(1)), json!({"url": "https://example.com"}))
             .await;
         assert!(response.error.is_none());
         let result = response.result.unwrap();
@@ -1302,10 +1311,7 @@ mod tests {
     async fn test_handle_visit_page_valid_url_fetch_fails() {
         let handler = DaedraHandler::new(ServerConfig::default()).unwrap();
         let response = handler
-            .handle_visit_page(
-                Some(json!(1)),
-                json!({"url": "https://127.0.0.1:1/"}),
-            )
+            .handle_visit_page(Some(json!(1)), json!({"url": "https://127.0.0.1:1/"}))
             .await;
         assert!(response.error.is_none());
         let result = response.result.unwrap();
@@ -1313,5 +1319,4 @@ mod tests {
         let text = result["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Failed to fetch"));
     }
-
 }

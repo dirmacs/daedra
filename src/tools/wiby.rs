@@ -5,7 +5,7 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraResult, DaedraError, ResultMetadata, SearchArgs, SearchResponse,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
     SearchResult,
 };
 use async_trait::async_trait;
@@ -54,7 +54,8 @@ impl SearchBackend for WibyBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(WIBY_API)
             .query(&[("q", args.query.as_str())])
             .send()
@@ -63,7 +64,8 @@ impl SearchBackend for WibyBackend {
 
         let data: Vec<WibyResult> = resp.json().await.map_err(DaedraError::HttpError)?;
 
-        let results: Vec<SearchResult> = data.into_iter()
+        let results: Vec<SearchResult> = data
+            .into_iter()
             .take(opts.num_results)
             .map(|r| SearchResult {
                 title: r.title,
@@ -78,9 +80,15 @@ impl SearchBackend for WibyBackend {
             })
             .collect();
 
-        info!(backend = "wiby", results = results.len(), "Wiby search complete");
+        info!(
+            backend = "wiby",
+            results = results.len(),
+            "Wiby search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "wiby" }
+    fn name(&self) -> &str {
+        "wiby"
+    }
 }

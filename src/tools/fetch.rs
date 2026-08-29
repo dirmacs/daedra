@@ -194,7 +194,7 @@ impl FetchClient {
         match fetched {
             FetchedContent::Html(html) => {
                 self.build_page_from_html(&html, &args.url, &parsed_url, args.selector.as_deref())
-            }
+            },
             FetchedContent::Pdf(text) => Ok(FetchClient::build_page_from_pdf(&text, &args.url)),
             FetchedContent::Binary { mime, size } => Err(DaedraError::ExtractionError(format!(
                 "Unsupported content type: {mime} ({size} bytes)"
@@ -391,14 +391,10 @@ impl FetchClient {
     }
 
     fn select_html_fragment(&self, document: &Html, sel: &str) -> DaedraResult<Option<String>> {
-        let custom_selector = Selector::parse(sel).map_err(|_| {
-            DaedraError::InvalidArguments(format!("Invalid CSS selector: {}", sel))
-        })?;
+        let custom_selector = Selector::parse(sel)
+            .map_err(|_| DaedraError::InvalidArguments(format!("Invalid CSS selector: {}", sel)))?;
 
-        Ok(document
-            .select(&custom_selector)
-            .next()
-            .map(|el| el.html()))
+        Ok(document.select(&custom_selector).next().map(|el| el.html()))
     }
 
     fn select_first_content_selector(&self, document: &Html) -> Option<String> {
@@ -453,7 +449,6 @@ impl Default for FetchClient {
     }
 }
 
-
 fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }
@@ -489,7 +484,9 @@ fn classify_response_status(
     }
 
     if status.as_u16() == 403 {
-        return Err(backoff::Error::permanent(DaedraError::BotProtectionDetected));
+        return Err(backoff::Error::permanent(
+            DaedraError::BotProtectionDetected,
+        ));
     }
 
     Err(backoff::Error::permanent(DaedraError::FetchError(format!(
@@ -560,13 +557,10 @@ fn has_bot_protection_element(document: &Html) -> bool {
 }
 
 fn has_suspicious_title(document: &Html) -> bool {
-    document
-        .select(&TITLE_SELECTOR)
-        .next()
-        .is_some_and(|el| {
-            let title = el.text().collect::<String>().to_lowercase();
-            SUSPICIOUS_TITLES.iter().any(|s| title.contains(s))
-        })
+    document.select(&TITLE_SELECTOR).next().is_some_and(|el| {
+        let title = el.text().collect::<String>().to_lowercase();
+        SUSPICIOUS_TITLES.iter().any(|s| title.contains(s))
+    })
 }
 
 fn text_from_selector(document: &Html, selector: &Selector) -> Option<String> {
@@ -581,7 +575,9 @@ fn text_from_selector(document: &Html, selector: &Selector) -> Option<String> {
 fn classify_inferred_mime(mime: &str, bytes: &[u8]) -> Option<FetchedContent> {
     match mime {
         "application/pdf" => extract_pdf_content(bytes).ok(),
-        "text/html" | "application/xhtml+xml" => Some(FetchedContent::Html(bytes_to_utf8_string(bytes))),
+        "text/html" | "application/xhtml+xml" => {
+            Some(FetchedContent::Html(bytes_to_utf8_string(bytes)))
+        },
         m if is_binary_mime(m) => Some(FetchedContent::Binary {
             mime: m.to_string(),
             size: bytes.len(),
@@ -857,7 +853,10 @@ mod tests {
     #[test]
     fn test_clean_markdown_preserves_content() {
         let input = "# Heading\n\nParagraph with **bold** text.";
-        assert_eq!(clean_markdown(input), "# Heading\n\nParagraph with **bold** text.");
+        assert_eq!(
+            clean_markdown(input),
+            "# Heading\n\nParagraph with **bold** text."
+        );
     }
 
     #[test]
@@ -1008,7 +1007,10 @@ mod tests {
             title_from_url("https://example.com/docs/guide.pdf"),
             "guide.pdf"
         );
-        assert_eq!(title_from_url("https://example.com/"), "https://example.com/");
+        assert_eq!(
+            title_from_url("https://example.com/"),
+            "https://example.com/"
+        );
     }
 
     #[test]
@@ -1061,7 +1063,10 @@ mod tests {
             "<html><head><title>Article</title></head><body><article><p>{words}</p></article></body></html>"
         );
         assert!(extract_with_readability(&html, "https://example.com/article").is_some());
-        assert!(extract_with_readability("<html><body>Hi</body></html>", "https://example.com").is_none());
+        assert!(
+            extract_with_readability("<html><body>Hi</body></html>", "https://example.com")
+                .is_none()
+        );
     }
 
     #[test]
@@ -1111,7 +1116,8 @@ mod tests {
 
     #[test]
     fn test_build_page_from_pdf() {
-        let page = FetchClient::build_page_from_pdf("  hello world  ", "https://example.com/doc.pdf");
+        let page =
+            FetchClient::build_page_from_pdf("  hello world  ", "https://example.com/doc.pdf");
         assert_eq!(page.url, "https://example.com/doc.pdf");
         assert_eq!(page.title, "doc.pdf");
         assert_eq!(page.content, "hello world");
@@ -1214,7 +1220,8 @@ mod tests {
 
     #[test]
     fn test_check_bot_protection_clean() {
-        let html = r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
+        let html =
+            r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
         let client = FetchClient::default();
         assert!(client.check_bot_protection_for_tests(html).is_ok());
     }
@@ -1343,7 +1350,8 @@ mod tests {
 
     #[test]
     fn test_has_bot_protection_element_clean() {
-        let html = r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
+        let html =
+            r#"<html><head><title>Normal Page</title></head><body><p>Hello</p></body></html>"#;
         let document = Html::parse_document(html);
         assert!(!has_bot_protection_element(&document));
     }
@@ -1467,6 +1475,4 @@ mod tests {
             Some(FetchedContent::Binary { mime, .. }) if mime == "audio/mpeg"
         ));
     }
-
-
 }
