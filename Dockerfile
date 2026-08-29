@@ -9,6 +9,8 @@ RUN apt-get update && \
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY tests ./tests
+COPY benches ./benches
+COPY examples ./examples
 # Build with a stub main first is unnecessary: the crate is small, so a full
 # build stays under the layer-cache value. Build the binary directly.
 RUN cargo build --release
