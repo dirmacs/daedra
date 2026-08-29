@@ -4,6 +4,7 @@
 //! - Bing HTML scraping (default, no API key needed)
 //! - Serper.dev (Google results via API, needs SERPER_API_KEY)
 //! - Tavily (AI-optimized search, needs TAVILY_API_KEY)
+//! - You.com (unified web/news search via API, needs YDC_API_KEY)
 //! - DuckDuckGo HTML scraping (blocked from datacenter IPs, fallback only)
 
 use crate::types::{DaedraError, DaedraResult, SearchArgs, SearchResponse};
@@ -213,6 +214,14 @@ impl SearchProvider {
         {
             info!("Tavily backend enabled (TAVILY_API_KEY set)");
             backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
+        }
+
+        // You.com — unified web/news search via API, opt-in behind YDC_API_KEY.
+        if let Ok(key) = std::env::var("YDC_API_KEY")
+            && !key.is_empty()
+        {
+            info!("You.com backend enabled (YDC_API_KEY set)");
+            backends.push(Box::new(super::youcom::YouComBackend::new(key)));
         }
 
         // Mojeek — independent crawler index, no API key, bot-tolerant from

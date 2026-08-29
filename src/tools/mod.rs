@@ -3,10 +3,11 @@
 //! Search backends (in fallback order):
 //! 1. Serper.dev — Google results via API (needs SERPER_API_KEY)
 //! 2. Tavily — AI-optimized search (needs TAVILY_API_KEY)
-//! 3. Bing HTML scraping — no key, but blocked from most datacenter IPs
-//! 4. Wikipedia — always works, knowledge-focused
-//! 5. StackExchange — always works, technical Q&A
-//! 6. DuckDuckGo — blocked from datacenter IPs, last resort
+//! 3. You.com — unified web/news search via API (needs YDC_API_KEY)
+//! 4. Bing HTML scraping — no key, but blocked from most datacenter IPs
+//! 5. Wikipedia — always works, knowledge-focused
+//! 6. StackExchange — always works, technical Q&A
+//! 7. DuckDuckGo — blocked from datacenter IPs, last resort
 
 pub mod backend;
 pub mod bing;
@@ -26,6 +27,7 @@ pub mod stackexchange;
 pub mod tavily;
 pub mod wiby;
 pub mod wikipedia;
+pub mod youcom;
 
 pub use backend::*;
 pub use crawl::{crawl_site, parse_sitemap};
