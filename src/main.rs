@@ -612,12 +612,15 @@ async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
 /// * `quiet` - Disable all logging output
 fn setup_logging(verbose: bool, use_stderr: bool, quiet: bool) {
     // If quiet mode, use a very restrictive filter that effectively disables logging
+    // Default to warnings only: the per-backend progress chatter is useful
+    // under --verbose and pure noise in normal runs, where results go to
+    // stdout and logs to stderr.
     let filter = if quiet {
         EnvFilter::new("off")
     } else if verbose {
         EnvFilter::new("debug")
     } else {
-        EnvFilter::new("info")
+        EnvFilter::new("warn")
     };
 
     let subscriber = fmt()
