@@ -142,6 +142,12 @@ const SUSPICIOUS_TITLES: &[&str] = &[
 enum FetchedContent {
     Html(String),
     Pdf(String),
+    /// Office/ ebook documents (docx, doc, odt, rtf, epub, pptx, xlsx,
+    /// csv) converted to Markdown by `anydoc`.
+    Document {
+        mime: String,
+        markdown: String,
+    },
     /// Textual non-HTML content (SVG, XML, JSON...) delivered verbatim.
     Text {
         mime: String,
@@ -227,6 +233,9 @@ impl FetchClient {
                 args.include_images,
             ),
             FetchedContent::Pdf(text) => Ok(FetchClient::build_page_from_pdf(&text, &args.url)),
+            FetchedContent::Document { mime, markdown } => {
+                Ok(Self::build_page_from_document(&markdown, &mime, &args.url))
+            },
             FetchedContent::Text { mime, body } => {
                 Ok(Self::build_page_from_text(&body, &mime, &args.url))
             },
@@ -296,6 +305,32 @@ impl FetchClient {
             timestamp: chrono::Utc::now().to_rfc3339(),
             word_count,
             content_type: Some("pdf".to_string()),
+            links: None,
+        }
+    }
+
+    /// Convert a document (docx, odt, epub, ...) already rendered to
+    /// Markdown by `anydoc` into a page. Content is used verbatim: it is
+    /// already Markdown.
+    fn build_page_from_document(markdown: &str, mime: &str, url: &str) -> PageContent {
+        let trimmed = markdown.trim();
+        let title = title_from_url(url);
+        let word_count = word_count(trimmed);
+
+        info!(
+            url = %url,
+            mime = %mime,
+            word_count = word_count,
+            "Document converted to Markdown"
+        );
+
+        PageContent {
+            url: url.to_string(),
+            title,
+            content: trimmed.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            word_count,
+            content_type: Some(mime.to_string()),
             links: None,
         }
     }
@@ -372,8 +407,13 @@ impl FetchClient {
                 }
 
                 // SVG/XML/JSON look binary to the mime list but are text we
-                // can deliver verbatim; let classification handle them.
-                if is_known_binary_content_type(&ct) && !is_textual_content_type(&ct) {
+                // can deliver verbatim; Office documents convert to
+                // Markdown. Both are handled by classification instead.
+                if is_known_binary_content_type(&ct)
+                    && !is_textual_content_type(&ct)
+                    && !is_office_content_type(&ct)
+                    && !is_container_mime(&ct)
+                {
                     let bytes = response.bytes().await.map_err(|e| {
                         error!(error = %e, url = %url, "Failed to read response body");
                         RetryErr::Permanent(DaedraError::HttpError(e))
@@ -624,9 +664,16 @@ fn check_body_size(size: usize) -> DaedraResult<()> {
 }
 
 fn extract_pdf_content(bytes: &[u8]) -> DaedraResult<FetchedContent> {
-    let text = pdf_extract::extract_text_from_mem(bytes)
-        .map_err(|e| DaedraError::ExtractionError(e.to_string()))?;
-    Ok(FetchedContent::Pdf(text))
+    // pdf-inspector (MIT, zero deps) replaces pdf-extract: it emits
+    // Markdown directly and reports which pages need OCR instead of
+    // failing silently on scanned documents.
+    match pdf_inspector::process_pdf_mem(bytes) {
+        Ok(result) => {
+            let markdown = result.markdown.unwrap_or_default();
+            Ok(FetchedContent::Pdf(markdown))
+        },
+        Err(e) => Err(DaedraError::ExtractionError(e.to_string())),
+    }
 }
 
 fn has_bot_protection_element(document: &Html) -> bool {
@@ -657,6 +704,17 @@ fn classify_inferred_mime(mime: &str, bytes: &[u8]) -> Option<FetchedContent> {
         "text/html" | "application/xhtml+xml" => {
             Some(FetchedContent::Html(bytes_to_utf8_string(bytes)))
         },
+        // Office/ ebook documents convert to Markdown via anydoc.
+        m if is_office_content_type(m) => extract_document_content(bytes, m).ok(),
+        // Zip/octet-stream containers: anydoc sniffs the archive contents;
+        // a plain zip falls back to Binary.
+        m if is_container_mime(m) => match extract_document_content(bytes, m) {
+            Ok(doc) => Some(doc),
+            Err(_) => Some(FetchedContent::Binary {
+                mime: m.to_string(),
+                size: bytes.len(),
+            }),
+        },
         // SVG and other textual XML are content, not opaque binaries: hand
         // the source to the caller instead of "unsupported content type".
         m if is_textual_content_type(m) => Some(FetchedContent::Text {
@@ -682,10 +740,55 @@ fn is_textual_content_type(ct: &str) -> bool {
     ct.contains("svg") || ct.contains("xml") || ct.contains("json")
 }
 
+/// True for Office/ ebook content types that `anydoc` converts to
+/// Markdown. Checked BEFORE the textual-XML rule: the docx/odt MIME strings
+/// contain the substring "xml" but are zip containers, not text.
+fn is_office_content_type(ct: &str) -> bool {
+    ct.contains("officedocument")
+        || ct.contains("msword")
+        || ct.contains("ms-powerpoint")
+        || ct.contains("ms-excel")
+        || ct.contains("epub")
+        || ct.contains("opendocument")
+        || ct == "application/rtf"
+        || ct == "text/csv"
+        || ct.contains("presentationml")
+        || ct.contains("spreadsheetml")
+}
+
+/// Zip containers (docx, odt, epub, xlsx, pptx are all zips) sometimes
+/// arrive typed only as `application/zip` or `application/octet-stream` —
+/// many static file servers do this. anydoc detects the real format from
+/// the archive contents; on failure it is an ordinary zip and stays binary.
+fn is_container_mime(ct: &str) -> bool {
+    ct == "application/zip" || ct == "application/octet-stream"
+}
+
+/// Convert an Office/ ebook document to Markdown via `anydoc`. Format
+/// detection runs on the bytes, so a wrong MIME header is survivable.
+fn extract_document_content(bytes: &[u8], ct: &str) -> DaedraResult<FetchedContent> {
+    // CSV has no byte signature; anydoc requires the format named for it.
+    let format = if normalize_content_type(ct) == "text/csv" {
+        Some(anydoc::Format::Csv)
+    } else {
+        None
+    };
+    let markdown = anydoc::to_markdown_bytes(bytes, format)
+        .map_err(|e| DaedraError::ExtractionError(format!("document convert: {e}")))?;
+    Ok(FetchedContent::Document {
+        mime: ct.to_string(),
+        markdown,
+    })
+}
+
 fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
     let ct = normalize_content_type(content_type);
     if ct.contains("text/html") {
         return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+
+    if is_office_content_type(&ct) {
+        return extract_document_content(bytes, &ct);
     }
 
     if is_textual_content_type(&ct) {
@@ -899,6 +1002,19 @@ impl FetchClient {
         let document = Html::parse_document(html);
         self.select_content_html(html, &document, url, selector)
     }
+}
+
+/// Convert raw HTML to page content with the production extraction path
+/// (Readability, bot checks, link extraction). Used by the crawlberg
+/// engine adapter.
+#[cfg(feature = "crawlberg")]
+pub fn html_to_page_content(
+    html: &str,
+    url: &str,
+    include_images: bool,
+) -> DaedraResult<PageContent> {
+    let client = FetchClient::default();
+    client.build_page_from_html(html, url, &validate_url(url)?, None, include_images)
 }
 
 #[cfg(test)]
@@ -1548,7 +1664,27 @@ mod tests {
     fn test_classify_inferred_mime_text_csv() {
         let bytes = b"name,value\na,1";
         let result = classify_inferred_mime("text/csv", bytes);
-        assert!(matches!(result, Some(FetchedContent::Html(_))));
+        // CSV now converts to Markdown via anydoc, not the HTML path.
+        assert!(
+            matches!(result, Some(FetchedContent::Document { mime, .. }) if mime.contains("csv"))
+        );
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_docx_is_document_not_text() {
+        // The docx MIME contains the substring "xml"; the office rule must
+        // win so the zip container is not handed back as text.
+        let docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        let result = classify_inferred_mime(docx_mime, b"PK\x03\x04 not really a docx");
+        // The office rule must win over the textual-xml rule: a broken
+        // document errors out, it never comes back as raw "text".
+        assert!(!matches!(result, Some(FetchedContent::Text { .. })));
+        assert!(is_office_content_type(&normalize_content_type(docx_mime)));
+    }
+
+    #[test]
+    fn test_extract_document_content_rejects_garbage() {
+        assert!(extract_document_content(b"PK\x03\x04garbage", "application/epub+zip").is_err());
     }
 
     #[test]

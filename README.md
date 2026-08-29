@@ -101,6 +101,10 @@ daedra search "tokio" --exclude bing-rss --exclude gnews
 # Fetch a webpage as Markdown (HTML via Readability, PDF via pdf-extract)
 daedra fetch https://rust-lang.org
 daedra fetch https://example.com/report.pdf --timeout 60
+daedra fetch https://example.com/report.docx   # docx, odt, epub, pptx, xlsx, csv too
+
+# Crawl with the optional crawlberg engine (rebuild with --features crawlberg)
+daedra crawl https://rust-lang.org --engine crawlberg -m 10 -d 3
 
 # Crawl: root page always included; robots.txt honored; depth follows links
 daedra crawl https://rust-lang.org -m 5 --depth 2 --delay-ms 250
