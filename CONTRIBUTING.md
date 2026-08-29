@@ -1,59 +1,57 @@
 # Contributing to Daedra
 
-First off, thank you for considering contributing to Daedra! It's people like you that make Daedra such a great tool.
+Thank you for your interest in Daedra. This document tells you how to report bugs, suggest changes, and submit code.
 
-## Code of Conduct
+## Code of conduct
 
-This project and everyone participating in it is governed by our commitment to maintaining a welcoming, inclusive environment. Please be respectful and constructive in all interactions.
+Be respectful and constructive in all project interactions.
 
-## How Can I Contribute?
+## Report a bug
 
-### Reporting Bugs
+Before you create a bug report, read the existing issues. Do not create a duplicate. Include this information in your report:
 
-Before creating bug reports, please check the existing issues to avoid duplicates. When you create a bug report, include as many details as possible:
+- A clear and descriptive title
+- The exact steps that reproduce the problem
+- Specific examples: code snippets, commands, or both
+- The behavior you observed, and the behavior you expected
+- Your environment: operating system, Rust version, and related details
 
-- **Use a clear and descriptive title**
-- **Describe the exact steps to reproduce the problem**
-- **Provide specific examples** (code snippets, commands, etc.)
-- **Describe the behavior you observed and what you expected**
-- **Include your environment details** (OS, Rust version, etc.)
+## Suggest an enhancement
 
-### Suggesting Enhancements
+Enhancement suggestions live in GitHub issues. Include this information:
 
-Enhancement suggestions are tracked as GitHub issues. When creating an enhancement suggestion:
+- A clear and descriptive title
+- A detailed description of the enhancement
+- The reason the enhancement is useful
+- Alternatives that you considered
 
-- **Use a clear and descriptive title**
-- **Provide a detailed description of the suggested enhancement**
-- **Explain why this enhancement would be useful**
-- **List any alternatives you've considered**
+## Submit a pull request
 
-### Pull Requests
+1. Fork the repository. Create your branch from `main`.
+2. Write your code. Follow the code standards in this document.
+3. Add tests for each new function.
+4. Run `cargo test`. All tests must pass.
+5. Run `cargo clippy -- -D warnings`. It must exit with code 0.
+6. Run `cargo fmt`.
+7. Update the documentation if your change needs it.
+8. Submit the pull request.
 
-1. **Fork the repository** and create your branch from `main`
-2. **Write your code** following our coding standards
-3. **Add tests** for any new functionality
-4. **Ensure all tests pass** (`cargo test`)
-5. **Run linting** (`cargo clippy -- -D warnings`)
-6. **Format your code** (`cargo fmt`)
-7. **Update documentation** if needed
-8. **Submit your pull request**
+## Development setup
 
-## Development Setup
+Prerequisites:
 
-### Prerequisites
-
-- Rust 1.91 or later
-- Cargo (comes with Rust)
+- Rust 1.98 or later
+- Cargo (ships with Rust)
 - Git
 
-### Getting Started
+Get started:
 
 ```bash
 # Clone your fork
 git clone https://github.com/YOUR_USERNAME/daedra.git
 cd daedra
 
-# Add upstream remote
+# Add the upstream remote
 git remote add upstream https://github.com/dirmacs/daedra.git
 
 # Create a branch for your changes
@@ -69,7 +67,7 @@ cargo test
 cargo run -- --help
 ```
 
-### Running Tests
+### Run tests
 
 ```bash
 # Run all tests
@@ -78,25 +76,25 @@ cargo test
 # Run tests with output
 cargo test -- --nocapture
 
-# Run specific tests
+# Run one test group
 cargo test search_tests
 
-# Run integration tests (requires network)
+# Run integration tests (needs network access)
 cargo test -- integration
 
 # Run benchmarks
 cargo bench
 ```
 
-### Code Style
+### Code style
 
-We use `rustfmt` and `clippy` to maintain consistent code style:
+The project uses `rustfmt` and `clippy`:
 
 ```bash
 # Format code
 cargo fmt
 
-# Check formatting
+# Check the formatting
 cargo fmt -- --check
 
 # Run clippy
@@ -108,10 +106,10 @@ cargo clippy --all-features -- -D warnings
 
 ### Documentation
 
-- All public APIs must have documentation comments
-- Use `///` for item documentation
-- Use `//!` for module-level documentation
-- Include examples in documentation where helpful
+- Write a documentation comment for every public API item.
+- Use `///` for item documentation.
+- Use `//!` for module documentation.
+- Add examples where they help the reader.
 
 ```rust
 /// Performs a web search using DuckDuckGo.
@@ -140,14 +138,14 @@ pub async fn perform_search(args: &SearchArgs) -> DaedraResult<SearchResponse> {
 }
 ```
 
-### Commit Messages
+### Commit messages
 
-- Use the present tense ("Add feature" not "Added feature")
-- Use the imperative mood ("Move cursor to..." not "Moves cursor to...")
-- Limit the first line to 72 characters or less
-- Reference issues and pull requests when relevant
+- Write commit titles in the imperative mood: "Add feature", not "Added feature".
+- Keep the first line at 72 characters or less.
+- Reference issues and pull requests when relevant.
 
 Example:
+
 ```
 Add caching support for search results
 
@@ -158,15 +156,15 @@ Add caching support for search results
 Fixes #123
 ```
 
-### Branch Naming
+### Branch names
 
-- `feature/description` - New features
-- `fix/description` - Bug fixes
-- `docs/description` - Documentation changes
-- `refactor/description` - Code refactoring
-- `test/description` - Test additions/changes
+- `feature/description` — new features
+- `fix/description` — bug fixes
+- `docs/description` — documentation changes
+- `refactor/description` — code refactoring
+- `test/description` — test additions and changes
 
-## Project Structure
+## Project structure
 
 ```
 daedra/
@@ -178,8 +176,11 @@ daedra/
 │   ├── cache.rs        # Caching implementation
 │   └── tools/
 │       ├── mod.rs      # Tools module
-│       ├── search.rs   # Search implementation
-│       └── fetch.rs    # Page fetching implementation
+│       ├── backend.rs  # SearchProvider, fallback chain, circuit breakers
+│       ├── rss.rs      # Machine-format backends (Bing RSS, Google News, HN)
+│       ├── search.rs   # DuckDuckGo HTML search
+│       ├── fetch.rs    # Page fetching implementation
+│       └── soft_block.rs # Zero-result page classifier
 ├── tests/
 │   ├── integration_tests.rs      # General integration tests
 │   └── stdio_transport_tests.rs  # STDIO transport & MCP protocol tests
@@ -195,24 +196,22 @@ daedra/
         └── publish.yml
 ```
 
-## Review Process
+## Review process
 
-1. A maintainer will review your PR
-2. They may request changes or ask questions
-3. Once approved, your PR will be merged
-4. You'll be added to the contributors list!
+1. A maintainer reviews your pull request.
+2. The maintainer requests changes or asks questions if the code needs them.
+3. The maintainer merges the pull request after approval.
+4. Your name joins the contributors list.
 
-## Release Process
+## Release process
 
-Releases are managed by maintainers. The process is:
+Maintainers manage releases. The process is:
 
-1. Update version in `Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Create a release tag
-4. CI automatically publishes to crates.io
+1. Update the version in `Cargo.toml`.
+2. Update `CHANGELOG.md`.
+3. Create a release tag.
+4. CI publishes to crates.io automatically.
 
-## Questions?
+## Questions
 
-Feel free to open an issue with your question or reach out to the maintainers.
-
-Thank you for contributing! 🎉
+Open an issue with your question. A maintainer will answer.

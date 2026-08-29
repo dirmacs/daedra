@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.3.8"
+version = "0.3.9"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP."
@@ -11,7 +11,7 @@ documentation = "https://docs.rs/daedra"
 readme = "README.md"
 keywords = ["mcp", "duckduckgo", "search", "ai", "cli"]
 categories = ["command-line-utilities", "web-programming", "development-tools"]
-rust-version = "1.91"
+rust-version = "1.98"
 
 [lib]
 name = "daedra"
