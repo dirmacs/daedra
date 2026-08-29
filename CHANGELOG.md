@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-08-29
+
+### Fixed
+- Aggregate search-failure errors now distinguish backends that **failed** (with per-backend error detail) from backends that legitimately returned 0 results — the old message conflated the two, hiding rate limits/CAPTCHAs behind a "0 results" claim
+
 ## [0.3.4] - 2026-08-29
 
 ### Fixed
