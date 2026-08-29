@@ -5,8 +5,8 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    region_to_mkt, ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs,
-    SearchResponse, SearchResult,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
+    SearchResult, region_to_mkt,
 };
 use async_trait::async_trait;
 use lazy_static::lazy_static;
@@ -105,7 +105,8 @@ impl SearchBackend for BingBackend {
             query.push(("mkt", mkt));
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(BING_URL)
             .query(&query)
             .send()
@@ -114,7 +115,10 @@ impl SearchBackend for BingBackend {
 
         if !resp.status().is_success() {
             warn!(status = %resp.status(), "Bing returned non-200");
-            return Err(DaedraError::SearchError(format!("Bing status {}", resp.status())));
+            return Err(DaedraError::SearchError(format!(
+                "Bing status {}",
+                resp.status()
+            )));
         }
 
         let html = resp.text().await.map_err(DaedraError::HttpError)?;
@@ -124,11 +128,17 @@ impl SearchBackend for BingBackend {
             warn!("Bing returned 0 results — may be blocked or CAPTCHA");
         }
 
-        info!(backend = "bing", results = results.len(), "Bing search complete");
+        info!(
+            backend = "bing",
+            results = results.len(),
+            "Bing search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "bing" }
+    fn name(&self) -> &str {
+        "bing"
+    }
 }
 
 #[cfg(test)]

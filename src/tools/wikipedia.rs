@@ -5,7 +5,7 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraResult, DaedraError, ResultMetadata, SearchArgs, SearchResponse,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
     SearchResult,
 };
 use async_trait::async_trait;
@@ -43,7 +43,8 @@ impl SearchBackend for WikipediaBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(WIKIPEDIA_API)
             .query(&[
                 ("action", "opensearch"),
@@ -86,11 +87,17 @@ impl SearchBackend for WikipediaBackend {
             }
         }
 
-        info!(backend = "wikipedia", results = results.len(), "Wikipedia search complete");
+        info!(
+            backend = "wikipedia",
+            results = results.len(),
+            "Wikipedia search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "wikipedia" }
+    fn name(&self) -> &str {
+        "wikipedia"
+    }
 }
 
 #[cfg(test)]

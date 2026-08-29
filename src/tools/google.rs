@@ -7,8 +7,8 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    region_to_gl_hl, ContentType, DaedraError, DaedraResult, ResultMetadata, SafeSearchLevel,
-    SearchArgs, SearchResponse, SearchResult,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SafeSearchLevel, SearchArgs,
+    SearchResponse, SearchResult, region_to_gl_hl,
 };
 use async_trait::async_trait;
 use lazy_static::lazy_static;
@@ -44,13 +44,11 @@ fn is_google_internal_url(url: &str) -> bool {
 }
 
 fn extract_google_result(element: &ElementRef) -> Option<SearchResult> {
-    let link_el = element
-        .select(&LINK_SELECTOR)
-        .find(|a| {
-            a.value()
-                .attr("href")
-                .is_some_and(|href| href.starts_with("http") && !is_google_internal_url(href))
-        })?;
+    let link_el = element.select(&LINK_SELECTOR).find(|a| {
+        a.value()
+            .attr("href")
+            .is_some_and(|href| href.starts_with("http") && !is_google_internal_url(href))
+    })?;
 
     let url = link_el.value().attr("href").unwrap_or_default();
     let title: String = link_el.text().collect();

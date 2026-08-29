@@ -5,8 +5,8 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    DaedraError, DaedraResult, SearchArgs, SearchResponse, SearchResult, ResultMetadata,
-    ContentType,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
+    SearchResult,
 };
 use async_trait::async_trait;
 use reqwest::Client;
@@ -57,7 +57,8 @@ impl SearchBackend for TavilyBackend {
             "search_depth": "basic",
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(TAVILY_URL)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -67,7 +68,9 @@ impl SearchBackend for TavilyBackend {
 
         let data: TavilyResponse = resp.json().await.map_err(DaedraError::HttpError)?;
 
-        let results: Vec<SearchResult> = data.results.unwrap_or_default()
+        let results: Vec<SearchResult> = data
+            .results
+            .unwrap_or_default()
             .into_iter()
             .map(|r| SearchResult {
                 title: r.title,
@@ -83,10 +86,18 @@ impl SearchBackend for TavilyBackend {
             .take(opts.num_results)
             .collect();
 
-        info!(backend = "tavily", results = results.len(), "Tavily search complete");
+        info!(
+            backend = "tavily",
+            results = results.len(),
+            "Tavily search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "tavily" }
-    fn requires_api_key(&self) -> bool { true }
+    fn name(&self) -> &str {
+        "tavily"
+    }
+    fn requires_api_key(&self) -> bool {
+        true
+    }
 }

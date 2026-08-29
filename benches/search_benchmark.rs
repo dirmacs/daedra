@@ -95,7 +95,9 @@ fn bench_serialization(c: &mut Criterion) {
             BenchmarkId::new("json_deserialize", size),
             &json,
             |b, json| {
-                b.iter(|| serde_json::from_str::<SearchResponse>(std::hint::black_box(json)).unwrap());
+                b.iter(|| {
+                    serde_json::from_str::<SearchResponse>(std::hint::black_box(json)).unwrap()
+                });
             },
         );
     }

@@ -5,7 +5,7 @@
 
 use super::backend::SearchBackend;
 use crate::types::{
-    ContentType, DaedraResult, DaedraError, ResultMetadata, SearchArgs, SearchResponse,
+    ContentType, DaedraError, DaedraResult, ResultMetadata, SearchArgs, SearchResponse,
     SearchResult,
 };
 use async_trait::async_trait;
@@ -61,7 +61,8 @@ impl SearchBackend for StackExchangeBackend {
     async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
         let opts = args.options.clone().unwrap_or_default();
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(STACKEXCHANGE_API)
             .query(&[
                 ("q", args.query.as_str()),
@@ -77,7 +78,9 @@ impl SearchBackend for StackExchangeBackend {
 
         let data: SeResponse = resp.json().await.map_err(DaedraError::HttpError)?;
 
-        let results: Vec<SearchResult> = data.items.unwrap_or_default()
+        let results: Vec<SearchResult> = data
+            .items
+            .unwrap_or_default()
             .into_iter()
             .map(|item| {
                 let desc = format!("Score: {} | Answers: {}", item.score, item.answer_count);
@@ -96,11 +99,17 @@ impl SearchBackend for StackExchangeBackend {
             .take(opts.num_results)
             .collect();
 
-        info!(backend = "stackoverflow", results = results.len(), "StackExchange search complete");
+        info!(
+            backend = "stackoverflow",
+            results = results.len(),
+            "StackExchange search complete"
+        );
         Ok(SearchResponse::new(args.query.clone(), results, &opts))
     }
 
-    fn name(&self) -> &str { "stackoverflow" }
+    fn name(&self) -> &str {
+        "stackoverflow"
+    }
 }
 
 #[cfg(test)]
@@ -119,7 +128,10 @@ mod tests {
             }),
         };
         let response = backend.search(&args).await.unwrap();
-        assert!(!response.data.is_empty(), "StackOverflow should return results");
+        assert!(
+            !response.data.is_empty(),
+            "StackOverflow should return results"
+        );
         assert!(response.data[0].url.contains("stackoverflow.com"));
     }
 }

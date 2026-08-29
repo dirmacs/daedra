@@ -32,7 +32,8 @@ use tracing::{info, warn};
 use url::Url;
 
 /// Default User-Agent string for sitemap/robots fetches.
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; daedra-crawl; +https://github.com/dirmacs/daedra)";
+const USER_AGENT: &str =
+    "Mozilla/5.0 (compatible; daedra-crawl; +https://github.com/dirmacs/daedra)";
 
 /// Hard cap on sitemap response size (10 MB) to bound worst-case parser work.
 const SITEMAP_MAX_BYTES: usize = 10 * 1024 * 1024;
@@ -65,11 +66,11 @@ async fn read_sitemap_body(resp: reqwest::Response, url: &Url) -> Option<String>
                 url, SITEMAP_MAX_BYTES
             );
             None
-        }
+        },
         Err(e) => {
             warn!("sitemap {} body read failed: {}", url, e);
             None
-        }
+        },
     }
 }
 
@@ -84,7 +85,7 @@ async fn fetch_sitemap_body(client: &Client, url: &Url) -> Option<String> {
         Err(e) => {
             warn!("sitemap probe {} failed: {}", url, e);
             return None;
-        }
+        },
     };
 
     if !resp.status().is_success() {
@@ -145,9 +146,10 @@ pub fn parse_sitemap(body: &str) -> Vec<Url> {
         };
         let loc_text = after_open[..close].trim();
         if let Ok(parsed) = Url::parse(loc_text)
-            && !out.iter().any(|existing: &Url| existing == &parsed) {
-                out.push(parsed);
-            }
+            && !out.iter().any(|existing: &Url| existing == &parsed)
+        {
+            out.push(parsed);
+        }
         rest = &after_open[close + "</loc>".len()..];
         // Silence the unused write-only state — `current`/`in_loc` are
         // reserved for a future switch to a proper SAX pass if sitemaps
@@ -231,10 +233,14 @@ async fn discover_via_anchors(client: &Client, root: &Url, cap: usize) -> Daedra
         .header("User-Agent", USER_AGENT)
         .send()
         .await
-        .map_err(|e| DaedraError::FetchError(format!("anchor discovery GET {} failed: {}", root, e)))?
+        .map_err(|e| {
+            DaedraError::FetchError(format!("anchor discovery GET {} failed: {}", root, e))
+        })?
         .text()
         .await
-        .map_err(|e| DaedraError::FetchError(format!("anchor discovery body {} failed: {}", root, e)))?;
+        .map_err(|e| {
+            DaedraError::FetchError(format!("anchor discovery body {} failed: {}", root, e))
+        })?;
 
     let doc = Html::parse_document(&body);
     Ok(extract_same_origin_links(&doc, root, cap))
@@ -259,7 +265,7 @@ async fn discover_urls(
         None => {
             let urls = discover_via_anchors(client, root, max_pages * 2).await?;
             Ok((urls, false))
-        }
+        },
     }
 }
 
@@ -308,14 +314,14 @@ async fn collect_crawl_results(
                     markdown: page.content,
                     links,
                 });
-            }
+            },
             Ok(Some((url, Err(e)))) => errors.push(CrawlError {
                 url,
                 error: e.to_string(),
             }),
             Ok(None) | Err(_) => {
                 // semaphore closed or task panic — skip silently
-            }
+            },
         }
     }
     (pages, errors)
@@ -403,7 +409,11 @@ mod tests {
   <sitemap><loc>https://example.com/sitemap-2.xml</loc></sitemap>
 </sitemapindex>"#;
         let urls = parse_sitemap(xml);
-        assert_eq!(urls.len(), 2, "sitemap index should return its nested loc entries");
+        assert_eq!(
+            urls.len(),
+            2,
+            "sitemap index should return its nested loc entries"
+        );
         assert!(urls[0].path().ends_with("sitemap-1.xml"));
     }
 
@@ -591,7 +601,6 @@ mod tests {
         assert_eq!(urls[1].as_str(), "https://example.com/second");
     }
 
-
     fn html_doc(body: &str) -> Html {
         Html::parse_document(body)
     }
@@ -722,5 +731,4 @@ mod tests {
         assert_eq!(urls.len(), 1);
         assert_eq!(urls[0].path(), "/dup");
     }
-
 }

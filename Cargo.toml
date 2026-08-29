@@ -78,7 +78,7 @@ dom_smoothie = "0.17"
 
 # MIME sniffing and PDF text extraction
 infer = "0.19"
-pdf-extract = "0.10"
+pdf-extract = "0.12"
 
 # HTTP server for SSE transport
 axum = { version = "0.8.7", features = ["macros"] }
