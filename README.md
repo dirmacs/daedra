@@ -5,7 +5,7 @@
 <h1 align="center">Daedra</h1>
 
 <p align="center">
-  Self-contained web search MCP server. Rust. 16 backends. Works from any IP.<br>
+  Self-contained web search MCP server. Rust. 17 backends. Works from any IP.<br>
   Single binary. Relevance-ranked multi-backend search. Zero configuration for basic search.
 </p>
 
@@ -24,18 +24,18 @@ Daedra is a self-contained web search [MCP](https://modelcontextprotocol.io/) se
 Major search engines block datacenter and VPS IP addresses with CAPTCHAs. Daedra solves this with a multi-backend fan-out. All available backends run the query at once, and the results merge by relevance:
 
 ```
-Serper (API) → Tavily (API) → Mojeek → Brave → Bing RSS → Bing → Google News → Hacker News → Marginalia → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
+Serper (API) → Tavily (API) → You.com (API) → Mojeek → Brave → Bing RSS → Bing → Google News → Hacker News → Marginalia → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
 ```
 
 Three backend groups exist. API backends need a key. Scraper backends read HTML and sometimes meet a CAPTCHA. Machine-format backends read the RSS and JSON feeds that the engines publish for integrations. The machine-format backends work from any IP with no key.
 
-Unkeyed general coverage depends on where daedra runs. Marginalia answers from any IP. Mojeek and Brave serve residential IPs and refuse datacenter ones; the circuit breaker sidelines them there. The knowledge and machine-format backends (wiki, HN, StackOverflow, GitHub, Bing RSS, Google News) work from any IP. Set `SERPER_API_KEY` or `TAVILY_API_KEY` for general search quality on any network.
+Unkeyed general coverage depends on where daedra runs. Marginalia answers from any IP. Mojeek and Brave serve residential IPs and refuse datacenter ones; the circuit breaker sidelines them there. The knowledge and machine-format backends (wiki, HN, StackOverflow, GitHub, Bing RSS, Google News) work from any IP. Set `SERPER_API_KEY`, `TAVILY_API_KEY`, or `YDC_API_KEY` for general search quality on any network.
 
 Per-backend circuit breakers and per-backend rate limits keep the chain stable under load. The chain retries only transient errors. Bot protection and rate-limit errors fail fast, so the next backend starts at once.
 
 ## Features
 
-- 16 search backends with automatic fallback (see the table below)
+- 17 search backends with automatic fallback (see the table below)
 - Circuit breaker (`BackendHealth`): opens after repeated failures, with a 30 second cooldown
 - Per-backend rate limits via `governor`, with separate quotas for API, knowledge, and scraper backends
 - Classified retry: the chain retries only transient errors
@@ -57,6 +57,7 @@ cargo install daedra
 |---------|------|---------|----------------|
 | Serper.dev | Google JSON API | `SERPER_API_KEY` | Yes |
 | Tavily | AI-optimized API | `TAVILY_API_KEY` | Yes |
+| You.com | Unified web/news API | `YDC_API_KEY` | Yes |
 | **Bing RSS** | `format=rss` machine output | None | **Always** |
 | Bing | HTML scraping | None | Sometimes (CAPTCHA risk) |
 | **Google News** | News RSS feed | None | **Always** |
@@ -71,7 +72,7 @@ cargo install daedra
 
 The merge ranks every result by how much of the query it shares. Results that share no query token land after every matched result. When no result matches at all, the search reports this. It does not return unrelated feed noise. Backends that ignore the query cannot outvote backends that found nothing relevant.
 
-Without API keys the backends are the knowledge and feed sources (Wikipedia, Hacker News, StackOverflow, GitHub, RSS). This is a research slice of the web, not a general web search. Set `SERPER_API_KEY` or `TAVILY_API_KEY` for general search quality.
+Without API keys the backends are the knowledge and feed sources (Wikipedia, Hacker News, StackOverflow, GitHub, RSS). This is a research slice of the web, not a general web search. Set `SERPER_API_KEY`, `TAVILY_API_KEY`, or `YDC_API_KEY` for general search quality.
 
 `--backend` and `--exclude` select or skip backends by name. `--time-range d|w|m|y` filters by recency on the backends that support it (Serper, Tavily, Hacker News, Google News).
 
@@ -207,6 +208,7 @@ Daedra
 # Optional API keys (improve result quality)
 export SERPER_API_KEY=...     # Google results via Serper
 export TAVILY_API_KEY=...     # AI-optimized search
+export YDC_API_KEY=...        # Unified web/news search via You.com
 export GITHUB_TOKEN=...       # Higher GitHub API rate limit
 
 # Logging
