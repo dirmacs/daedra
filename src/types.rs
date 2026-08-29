@@ -411,6 +411,12 @@ pub struct PageContent {
     /// Word count of extracted content
     pub word_count: usize,
 
+    /// Content type of the source document ("html", "pdf", "text/svg+xml",
+    /// "application/vnd.openxmlformats-...wordprocessingml.document", ...).
+    /// Agents use this to tell article text from source dumps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+
     /// Links found on the page
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<PageLink>>,
@@ -854,6 +860,7 @@ mod tests {
             content: "# Hello".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             word_count: 1,
+            content_type: Some("html".to_string()),
             links: Some(vec![PageLink {
                 text: "Link".to_string(),
                 url: "https://example.com/other".to_string(),

@@ -2,7 +2,7 @@
 //!
 //! A command-line interface for the Daedra MCP server.
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use colored::Colorize;
 use daedra::{
     DaedraResult, SERVER_NAME, VERSION,
@@ -48,6 +48,9 @@ struct Cli {
     #[arg(long, global = true)]
     no_color: bool,
 
+    #[command(flatten)]
+    globals: GlobalArgs,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -62,6 +65,23 @@ enum OutputFormat {
     Json,
     /// Compact JSON output
     JsonCompact,
+}
+
+/// Global options: accepted before or after any subcommand.
+#[derive(clap::Args, Clone, Debug)]
+struct GlobalArgs {
+    /// Disable result caching for search and fetch
+    #[arg(long, global = true)]
+    no_cache: bool,
+
+    /// Cache TTL in seconds
+    #[arg(long, global = true, default_value = "300")]
+    cache_ttl: u64,
+
+    /// Path to a TOML config file. Defaults to
+    /// ~/.config/daedra/daedra.toml when that file exists.
+    #[arg(long, global = true)]
+    config: Option<String>,
 }
 
 /// Available commands
@@ -80,14 +100,13 @@ enum Commands {
         /// Host to bind to for SSE transport
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
+    },
 
-        /// Disable result caching
-        #[arg(long)]
-        no_cache: bool,
-
-        /// Cache TTL in seconds
-        #[arg(long, default_value = "300")]
-        cache_ttl: u64,
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        #[arg(long, value_enum)]
+        shell: clap_complete::Shell,
     },
 
     /// Perform a web search
@@ -258,19 +277,37 @@ impl Commands {
         verbose: bool,
         quiet: bool,
         no_color: bool,
+        globals: &GlobalArgs,
     ) -> DaedraResult<()> {
+        // Flags win over the config file; the file wins over built-in
+        // defaults. Only values left at their default pick up file entries.
+        let file_cfg = load_file_config(globals.config.as_deref());
+        let mut globals = globals.clone();
+        if globals.cache_ttl == 300 {
+            globals.cache_ttl = file_cfg.cache_ttl_secs.unwrap_or(300);
+        }
         match self {
             Commands::Serve {
                 transport,
                 port,
                 host,
-                no_cache,
-                cache_ttl,
             } => {
                 if should_print_banner(verbose, quiet, format, transport) {
                     print_banner();
                 }
-                run_serve(transport, port, host, no_cache, cache_ttl).await
+                run_serve(
+                    transport,
+                    port,
+                    host,
+                    build_cache_config(globals.no_cache, globals.cache_ttl),
+                )
+                .await
+            },
+
+            Commands::Completions { shell } => {
+                let mut cmd = Cli::command();
+                clap_complete::generate(shell, &mut cmd, SERVER_NAME, &mut std::io::stdout());
+                Ok(())
             },
 
             Commands::Search {
@@ -282,7 +319,7 @@ impl Commands {
                 backends,
                 exclude_backends,
             } => {
-                let opts = SearchOptions {
+                let mut opts = SearchOptions {
                     region,
                     safe_search: safe_search.into(),
                     num_results,
@@ -290,7 +327,13 @@ impl Commands {
                     backends: (!backends.is_empty()).then_some(backends),
                     exclude_backends: (!exclude_backends.is_empty()).then_some(exclude_backends),
                 };
-                run_search(query, opts, format, no_color).await
+                if opts.num_results == 10 {
+                    opts.num_results = file_cfg.num_results.unwrap_or(10);
+                }
+                if opts.region == "wt-wt" {
+                    opts.region = file_cfg.region.unwrap_or_else(|| "wt-wt".to_string());
+                }
+                run_search(query, opts, format, no_color, &globals).await
             },
 
             Commands::Fetch {
@@ -298,7 +341,23 @@ impl Commands {
                 selector,
                 include_images,
                 timeout,
-            } => run_fetch(url, selector, include_images, timeout, format, no_color).await,
+            } => {
+                let timeout = if timeout == 30 {
+                    file_cfg.timeout_secs.unwrap_or(30)
+                } else {
+                    timeout
+                };
+                run_fetch(
+                    url,
+                    selector,
+                    include_images,
+                    timeout,
+                    format,
+                    no_color,
+                    &globals,
+                )
+                .await
+            },
 
             Commands::Crawl {
                 url,
@@ -561,7 +620,7 @@ fn print_banner() {
 {}
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   {}   ║
+║   {}    ║
 ║   {}                         ║
 ║                                                               ║
 ║   A high-performance web search and research MCP server       ║
@@ -600,6 +659,34 @@ fn format_section(title: &str) -> String {
 
 fn format_info(label: &str, value: &str) -> String {
     format!("  {} {}\n", format!("{}:", label).bright_blue(), value)
+}
+
+/// Defaults loaded from a TOML file (--config or
+/// ~/.config/daedra/daedra.toml). Flags always win over file values.
+#[derive(Debug, Default, serde::Deserialize)]
+struct FileConfig {
+    num_results: Option<usize>,
+    region: Option<String>,
+    timeout_secs: Option<u64>,
+    cache_ttl_secs: Option<u64>,
+}
+
+fn load_file_config(path: Option<&str>) -> FileConfig {
+    let resolved = path.map(std::path::PathBuf::from).or_else(|| {
+        let home = std::env::var("HOME").ok()?;
+        let cfg = std::path::PathBuf::from(home).join(".config/daedra/daedra.toml");
+        cfg.is_file().then_some(cfg)
+    });
+    let Some(p) = resolved else {
+        return FileConfig::default();
+    };
+    match std::fs::read_to_string(&p) {
+        Ok(text) => toml::from_str(&text).unwrap_or_else(|e| {
+            eprintln!("warning: could not parse {}: {e}", p.display());
+            FileConfig::default()
+        }),
+        Err(_) => FileConfig::default(),
+    }
 }
 
 fn build_cache_config(no_cache: bool, cache_ttl: u64) -> CacheConfig {
@@ -646,11 +733,10 @@ async fn run_serve(
     transport: TransportOption,
     port: u16,
     host: String,
-    no_cache: bool,
-    cache_ttl: u64,
+    cache: CacheConfig,
 ) -> DaedraResult<()> {
     let config = ServerConfig {
-        cache: build_cache_config(no_cache, cache_ttl),
+        cache,
         verbose: false,
         ..Default::default()
     };
@@ -809,21 +895,50 @@ async fn run_search(
     opts: SearchOptions,
     format: OutputFormat,
     no_color: bool,
+    globals: &GlobalArgs,
 ) -> DaedraResult<()> {
     let args = SearchArgs {
         query: query.clone(),
-        options: Some(opts),
+        options: Some(opts.clone()),
     };
+
+    let cache =
+        daedra::cache::SearchCache::new(build_cache_config(globals.no_cache, globals.cache_ttl));
+    if let Some(cached) = cache
+        .get_search(&query, &opts.region, &format!("{:?}", opts.safe_search))
+        .await
+    {
+        return print_search(&query, cached, format, no_color);
+    }
 
     let provider = daedra::tools::SearchProvider::auto();
     let response = provider.search(&args).await?;
+    cache
+        .set_search(
+            &query,
+            &opts.region,
+            &format!("{:?}", opts.safe_search),
+            response.clone(),
+        )
+        .await;
 
+    print_search(&query, response, format, no_color)
+}
+
+/// Print a search response in the requested format (shared by cache hits
+/// and fresh runs).
+fn print_search(
+    query: &str,
+    response: daedra::types::SearchResponse,
+    format: OutputFormat,
+    no_color: bool,
+) -> DaedraResult<()> {
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
         OutputFormat::JsonCompact => println!("{}", serde_json::to_string(&response)?),
         OutputFormat::Pretty => {
             print_search_header_pretty(
-                &query,
+                query,
                 response.data.len(),
                 &response.metadata.search_context.region,
                 no_color,
@@ -844,12 +959,19 @@ async fn run_fetch(
     timeout_secs: u64,
     format: OutputFormat,
     no_color: bool,
+    globals: &GlobalArgs,
 ) -> DaedraResult<()> {
     let args = VisitPageArgs {
         url: url.clone(),
-        selector,
+        selector: selector.clone(),
         include_images,
     };
+
+    let cache =
+        daedra::cache::SearchCache::new(build_cache_config(globals.no_cache, globals.cache_ttl));
+    if let Some(cached) = cache.get_page(&url, selector.as_deref()).await {
+        return print_page(&cached, format, no_color);
+    }
 
     // Honor the flag by building a client with the requested timeout; the
     // default path uses the shared client.
@@ -860,11 +982,23 @@ async fn run_fetch(
             .fetch(&args)
             .await?
     };
+    cache
+        .set_page(&url, selector.as_deref(), content.clone())
+        .await;
 
+    print_page(&content, format, no_color)
+}
+
+/// Print fetched page content in the requested format.
+fn print_page(
+    content: &daedra::types::PageContent,
+    format: OutputFormat,
+    no_color: bool,
+) -> DaedraResult<()> {
     match format {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&content)?),
         OutputFormat::JsonCompact => println!("{}", serde_json::to_string(&content)?),
-        OutputFormat::Pretty => print_page_content_pretty(&content, no_color),
+        OutputFormat::Pretty => print_page_content_pretty(content, no_color),
     }
 
     Ok(())
@@ -1040,7 +1174,13 @@ async fn main() {
 
     let result = cli
         .command
-        .run(cli.format, cli.verbose, cli.quiet, cli.no_color)
+        .run(
+            cli.format,
+            cli.verbose,
+            cli.quiet,
+            cli.no_color,
+            &cli.globals,
+        )
         .await;
 
     if let Err(e) = result {
@@ -1055,6 +1195,14 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    fn test_globals() -> GlobalArgs {
+        GlobalArgs {
+            no_cache: true,
+            cache_ttl: 300,
+            config: None,
+        }
+    }
+
     use super::*;
     use daedra::types::{ContentType, PageLink, ResultMetadata};
 
@@ -1178,6 +1326,7 @@ Testing search functionality..."
             content: "Page body text.".to_string(),
             timestamp: "2024-01-01T00:00:00Z".to_string(),
             word_count: 3,
+            content_type: Some("html".to_string()),
             links: Some(vec![PageLink {
                 text: "Other".to_string(),
                 url: "https://example.com/other".to_string(),
@@ -1244,7 +1393,7 @@ Testing search functionality..."
     #[tokio::test]
     async fn test_commands_info() {
         let result = Commands::Info
-            .run(OutputFormat::Pretty, false, true, true)
+            .run(OutputFormat::Pretty, false, true, true, &test_globals())
             .await;
         assert!(result.is_ok());
     }
@@ -1261,7 +1410,7 @@ Testing search functionality..."
             backends: Vec::new(),
             exclude_backends: Vec::new(),
         }
-        .run(OutputFormat::Pretty, false, true, true)
+        .run(OutputFormat::Pretty, false, true, true, &test_globals())
         .await;
         assert!(result.is_ok());
     }
@@ -1288,7 +1437,7 @@ Testing search functionality..."
     #[ignore = "network"]
     async fn test_commands_check() {
         let result = Commands::Check
-            .run(OutputFormat::Pretty, false, true, true)
+            .run(OutputFormat::Pretty, false, true, true, &test_globals())
             .await;
         assert!(result.is_ok());
     }

@@ -263,6 +263,7 @@ mod tests {
             content: "# Hello World".to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
             word_count: 2,
+            content_type: None,
             links: None,
         };
 

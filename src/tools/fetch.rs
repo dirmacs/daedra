@@ -219,9 +219,13 @@ impl FetchClient {
         let fetched = self.fetch_with_retry(&args.url).await?;
 
         match fetched {
-            FetchedContent::Html(html) => {
-                self.build_page_from_html(&html, &args.url, &parsed_url, args.selector.as_deref())
-            },
+            FetchedContent::Html(html) => self.build_page_from_html(
+                &html,
+                &args.url,
+                &parsed_url,
+                args.selector.as_deref(),
+                args.include_images,
+            ),
             FetchedContent::Pdf(text) => Ok(FetchClient::build_page_from_pdf(&text, &args.url)),
             FetchedContent::Text { mime, body } => {
                 Ok(Self::build_page_from_text(&body, &mime, &args.url))
@@ -238,13 +242,14 @@ impl FetchClient {
         url: &str,
         base_url: &Url,
         selector: Option<&str>,
+        include_images: bool,
     ) -> DaedraResult<PageContent> {
         let document = Html::parse_document(html);
 
         self.check_bot_protection(&document)?;
 
         let title = self.extract_title(&document);
-        let content = self.extract_content(html, &document, url, selector)?;
+        let content = self.extract_content(html, &document, url, selector, include_images)?;
 
         let word_count = word_count(&content);
 
@@ -267,6 +272,7 @@ impl FetchClient {
             content,
             timestamp: chrono::Utc::now().to_rfc3339(),
             word_count,
+            content_type: Some("html".to_string()),
             links,
         })
     }
@@ -289,6 +295,7 @@ impl FetchClient {
             content,
             timestamp: chrono::Utc::now().to_rfc3339(),
             word_count,
+            content_type: Some("pdf".to_string()),
             links: None,
         }
     }
@@ -314,6 +321,7 @@ impl FetchClient {
             content,
             timestamp: chrono::Utc::now().to_rfc3339(),
             word_count,
+            content_type: Some(mime.to_string()),
             links: None,
         }
     }
@@ -448,8 +456,14 @@ impl FetchClient {
         document: &Html,
         url: &str,
         selector: Option<&str>,
+        include_images: bool,
     ) -> DaedraResult<String> {
         let content_html = self.select_content_html(html, document, url, selector)?;
+        let content_html = if include_images {
+            content_html
+        } else {
+            strip_img_tags(&content_html)
+        };
         let markdown = html_to_markdown(&content_html);
         let cleaned = clean_markdown(&markdown);
 
@@ -778,6 +792,28 @@ fn html_to_markdown(html: &str) -> String {
     htmd::convert(html).unwrap_or_else(|_| html.to_string())
 }
 
+/// Remove `<img ...>` and `<source ...>` elements from an HTML fragment so
+/// the Markdown conversion emits no image syntax. `include_images: false`
+/// is the default and this is what makes the flag real.
+fn strip_img_tags(html: &str) -> String {
+    let lower = html.to_lowercase();
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    let mut low = lower.as_str();
+    while let Some(i) = low.find("<img") {
+        match low[i..].find('>').map(|p| i + p + 1) {
+            Some(j) => {
+                out.push_str(&rest[..i]);
+                rest = &rest[j..];
+                low = &low[j..];
+            },
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Clean up Markdown content
 fn clean_markdown(markdown: &str) -> String {
     markdown
@@ -829,9 +865,10 @@ impl FetchClient {
         &self,
         html: &str,
         selector: Option<&str>,
+        include_images: bool,
     ) -> DaedraResult<String> {
         let document = Html::parse_document(html);
-        self.extract_content(html, &document, "", selector)
+        self.extract_content(html, &document, "", selector, include_images)
     }
 
     /// Same path as [`FetchClient::build_page_from_html`] without HTTP.
@@ -840,9 +877,10 @@ impl FetchClient {
         html: &str,
         url: &str,
         selector: Option<&str>,
+        include_images: bool,
     ) -> DaedraResult<PageContent> {
         let parsed_url = validate_url(url)?;
-        self.build_page_from_html(html, url, &parsed_url, selector)
+        self.build_page_from_html(html, url, &parsed_url, selector, include_images)
     }
 
     /// Exposes bot-protection checks for unit tests.
@@ -875,7 +913,7 @@ mod tests {
     fn characterization_issue_6_celiachia_extract_content_low_word_count() {
         let client = FetchClient::default();
         let content = client
-            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None)
+            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None, false)
             .expect("extract");
         let words = content.split_whitespace().count();
         assert!(
@@ -889,7 +927,7 @@ mod tests {
     fn fixed_issue_6_celiachia_extract_content_full_article() {
         let client = FetchClient::default();
         let content = client
-            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None)
+            .extract_content_from_html_for_tests(CELIACHIA_FIXTURE, None, false)
             .expect("extract");
         let words = content.split_whitespace().count();
         assert!(
@@ -1243,7 +1281,7 @@ mod tests {
         </body></html>"#;
         let client = FetchClient::default();
         let page = client
-            .build_page_from_html_for_tests(html, "https://example.com/page", None)
+            .build_page_from_html_for_tests(html, "https://example.com/page", None, false)
             .unwrap();
         assert_eq!(page.title, "Test Page");
         assert_eq!(page.url, "https://example.com/page");
@@ -1259,7 +1297,7 @@ mod tests {
         </body></html>"#;
         let client = FetchClient::default();
         let page = client
-            .build_page_from_html_for_tests(html, "https://example.com", Some("#main"))
+            .build_page_from_html_for_tests(html, "https://example.com", Some("#main"), false)
             .unwrap();
         assert!(page.content.contains("Main region only"));
         assert!(!page.content.contains("Sidebar noise"));
@@ -1280,7 +1318,7 @@ mod tests {
         );
         let client = FetchClient::default();
         let page = client
-            .build_page_from_html_for_tests(&html, "https://example.com", None)
+            .build_page_from_html_for_tests(&html, "https://example.com", None, false)
             .unwrap();
         assert!(page.word_count >= 50);
         let links = page.links.expect("expected links for long pages");
@@ -1296,7 +1334,7 @@ mod tests {
         </body></html>"#;
         let client = FetchClient::default();
         let page = client
-            .build_page_from_html_for_tests(html, "https://example.com/short", None)
+            .build_page_from_html_for_tests(html, "https://example.com/short", None, false)
             .unwrap();
         assert!(page.word_count < 50);
         assert!(page.links.is_none());
@@ -1339,7 +1377,7 @@ mod tests {
         );
         let client = FetchClient::default();
         let content = client
-            .extract_content_from_html_for_tests(&html, None)
+            .extract_content_from_html_for_tests(&html, None, false)
             .unwrap();
         assert!(word_count(&content) >= 50);
         assert!(content.contains("word0"));
@@ -1353,7 +1391,7 @@ mod tests {
         </body></html>"#;
         let client = FetchClient::default();
         let content = client
-            .extract_content_from_html_for_tests(html, Some("#target"))
+            .extract_content_from_html_for_tests(html, Some("#target"), false)
             .unwrap();
         assert!(content.contains("Selected fragment only"));
         assert!(!content.contains("Ignored sidebar"));
@@ -1366,7 +1404,7 @@ mod tests {
         </body></html>"#;
         let client = FetchClient::default();
         let content = client
-            .extract_content_from_html_for_tests(html, None)
+            .extract_content_from_html_for_tests(html, None, false)
             .unwrap();
         assert!(content.contains("Body fallback content"));
     }

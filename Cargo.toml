@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP."
@@ -91,6 +91,8 @@ governor = "0.10.2"
 
 # Retry logic
 html-escape = "0.2.13"
+clap_complete = "4"
+toml = "0.9"
 
 [dev-dependencies]
 tokio-test = "0.4.4"

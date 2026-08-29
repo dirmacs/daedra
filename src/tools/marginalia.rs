@@ -17,7 +17,8 @@ use serde::Deserialize;
 use std::time::Duration;
 use tracing::{info, warn};
 
-const MARGINALIA_API: &str = "https://api.marginalia.nu/public/search";
+const MARGINALIA_API_PUBLIC: &str = "https://api.marginalia.nu/public/search";
+const MARGINALIA_API_KEYED: &str = "https://api.marginalia.nu";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 #[derive(Debug, Deserialize)]
@@ -43,7 +44,16 @@ pub struct MarginaliaBackend {
 impl MarginaliaBackend {
     /// Create a new Marginalia backend instance.
     pub fn new() -> Self {
-        Self::with_base_url(MARGINALIA_API.to_string())
+        // MARGINALIA_API_KEY selects the keyed endpoint with higher limits;
+        // without it the shared `public` license key serves the request.
+        // The public key has no SLA — it is a shared courtesy endpoint.
+        match std::env::var("MARGINALIA_API_KEY") {
+            Ok(key) if !key.trim().is_empty() => {
+                info!("Marginalia backend using MARGINALIA_API_KEY");
+                Self::with_base_url(format!("{MARGINALIA_API_KEYED}/{key}/search"))
+            },
+            _ => Self::with_base_url(MARGINALIA_API_PUBLIC.to_string()),
+        }
     }
 
     /// Point at a custom endpoint (tests).
