@@ -5,8 +5,8 @@
 <h1 align="center">Daedra</h1>
 
 <p align="center">
-  Self-contained web search MCP server. Rust. 13 backends. Works from any IP.<br>
-  Single binary. Automatic backend fallback. Zero configuration for basic search.
+  Self-contained web search MCP server. Rust. 16 backends. Works from any IP.<br>
+  Single binary. Relevance-ranked multi-backend search. Zero configuration for basic search.
 </p>
 
 <p align="center">
@@ -21,19 +21,21 @@ Daedra is a self-contained web search [MCP](https://modelcontextprotocol.io/) se
 
 ## Why Daedra
 
-Major search engines block datacenter and VPS IP addresses with CAPTCHAs. Daedra solves this with a multi-backend fallback chain. The chain tries one backend after the next until a backend returns results:
+Major search engines block datacenter and VPS IP addresses with CAPTCHAs. Daedra solves this with a multi-backend fan-out. All available backends run the query at once, and the results merge by relevance:
 
 ```
-Serper (API) → Tavily (API) → Bing RSS → Bing → Google News → Hacker News → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
+Serper (API) → Tavily (API) → Mojeek → Brave → Bing RSS → Bing → Google News → Hacker News → Marginalia → Google → Wikipedia → StackOverflow → GitHub → Wiby → DDG Instant → DuckDuckGo HTML
 ```
 
 Three backend groups exist. API backends need a key. Scraper backends read HTML and sometimes meet a CAPTCHA. Machine-format backends read the RSS and JSON feeds that the engines publish for integrations. The machine-format backends work from any IP with no key.
+
+Unkeyed general coverage depends on where daedra runs. Marginalia answers from any IP. Mojeek and Brave serve residential IPs and refuse datacenter ones; the circuit breaker sidelines them there. The knowledge and machine-format backends (wiki, HN, StackOverflow, GitHub, Bing RSS, Google News) work from any IP. Set `SERPER_API_KEY` or `TAVILY_API_KEY` for general search quality on any network.
 
 Per-backend circuit breakers and per-backend rate limits keep the chain stable under load. The chain retries only transient errors. Bot protection and rate-limit errors fail fast, so the next backend starts at once.
 
 ## Features
 
-- 13 search backends with automatic fallback (see the table below)
+- 16 search backends with automatic fallback (see the table below)
 - Circuit breaker (`BackendHealth`): opens after repeated failures, with a 30 second cooldown
 - Per-backend rate limits via `governor`, with separate quotas for API, knowledge, and scraper backends
 - Classified retry: the chain retries only transient errors
@@ -67,7 +69,11 @@ cargo install daedra
 | **DDG Instant** | Knowledge graph API | None | **Always** |
 | DuckDuckGo | HTML scraping | None | Rarely (blocked since mid-2025) |
 
-The provider tries the backends in order. The first backend that returns results wins.
+The merge ranks every result by how much of the query it shares. Results that share no query token land after every matched result. When no result matches at all, the search reports this. It does not return unrelated feed noise. Backends that ignore the query cannot outvote backends that found nothing relevant.
+
+Without API keys the backends are the knowledge and feed sources (Wikipedia, Hacker News, StackOverflow, GitHub, RSS). This is a research slice of the web, not a general web search. Set `SERPER_API_KEY` or `TAVILY_API_KEY` for general search quality.
+
+`--backend` and `--exclude` select or skip backends by name. `--time-range d|w|m|y` filters by recency on the backends that support it (Serper, Tavily, Hacker News, Google News).
 
 ## Usage
 
@@ -87,16 +93,22 @@ The provider tries the backends in order. The first backend that returns results
 ### CLI
 
 ```bash
-# Search
+# Search: pick backends, filter by recency
 daedra search "rust async runtime" --num-results 5
+daedra search "crate release" --backend hn --time-range w
+daedra search "tokio" --exclude bing-rss --exclude gnews
 
 # Fetch a webpage as Markdown (HTML via Readability, PDF via pdf-extract)
 daedra fetch https://rust-lang.org
+daedra fetch https://example.com/report.pdf --timeout 60
 
-# Check backend health
+# Crawl: root page always included; robots.txt honored; depth follows links
+daedra crawl https://rust-lang.org -m 5 --depth 2 --delay-ms 250
+
+# Check backend health (reports missing API keys; JSON with -f json)
 daedra check
 
-# Server info
+# Server info (four MCP tools; JSON with -f json)
 daedra info
 ```
 
@@ -155,7 +167,7 @@ Fetch a page and extract the content as Markdown. HTML pages use `dom_smoothie` 
 
 ### `crawl_site`
 
-Crawl a site from a root URL and return Markdown for each page. The crawler reads the sitemap when one exists. Otherwise it follows links.
+Crawl a site from a root URL and return Markdown for each page. The crawler always fetches the root page, honors robots.txt (longest-match rule; `ignore_robots` opts out), expands one level of sitemap indexes, and can follow same-origin link layers with `depth` (max 5). `delay_ms` staggers fetches. The command exits non-zero when it fetched zero pages.
 
 ## Architecture
 

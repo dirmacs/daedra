@@ -142,7 +142,15 @@ const SUSPICIOUS_TITLES: &[&str] = &[
 enum FetchedContent {
     Html(String),
     Pdf(String),
-    Binary { mime: String, size: usize },
+    /// Textual non-HTML content (SVG, XML, JSON...) delivered verbatim.
+    Text {
+        mime: String,
+        body: String,
+    },
+    Binary {
+        mime: String,
+        size: usize,
+    },
 }
 
 /// Returns true for hrefs that should be skipped (#, javascript:, mailto:, tel:).
@@ -185,9 +193,14 @@ pub struct FetchClient {
 impl FetchClient {
     /// Create a new fetch client
     pub fn new() -> DaedraResult<Self> {
+        Self::with_timeout(REQUEST_TIMEOUT)
+    }
+
+    /// Create a fetch client with a custom per-request timeout.
+    pub fn with_timeout(timeout: Duration) -> DaedraResult<Self> {
         let client = Client::builder()
             .user_agent(USER_AGENT)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(timeout)
             .gzip(true)
             .brotli(true)
             .redirect(reqwest::redirect::Policy::limited(10))
@@ -210,6 +223,9 @@ impl FetchClient {
                 self.build_page_from_html(&html, &args.url, &parsed_url, args.selector.as_deref())
             },
             FetchedContent::Pdf(text) => Ok(FetchClient::build_page_from_pdf(&text, &args.url)),
+            FetchedContent::Text { mime, body } => {
+                Ok(Self::build_page_from_text(&body, &mime, &args.url))
+            },
             FetchedContent::Binary { mime, size } => Err(DaedraError::ExtractionError(format!(
                 "Unsupported content type: {mime} ({size} bytes)"
             ))),
@@ -277,6 +293,31 @@ impl FetchClient {
         }
     }
 
+    /// Wrap textual non-HTML content (SVG, XML, JSON) in a code fence. The
+    /// title comes from the URL file name.
+    fn build_page_from_text(body: &str, mime: &str, url: &str) -> PageContent {
+        let trimmed = body.trim();
+        let title = title_from_url(url);
+        let content = format!("```{mime}\n{trimmed}\n```");
+        let word_count = word_count(&content);
+
+        info!(
+            url = %url,
+            mime = %mime,
+            word_count = word_count,
+            "Textual content fetched successfully"
+        );
+
+        PageContent {
+            url: url.to_string(),
+            title,
+            content,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            word_count,
+            links: None,
+        }
+    }
+
     /// Fetch page content with retry logic
     async fn fetch_with_retry(&self, url: &str) -> DaedraResult<FetchedContent> {
         let client = self.client.clone();
@@ -322,7 +363,9 @@ impl FetchClient {
                     return Ok(extract_pdf_content(&bytes)?);
                 }
 
-                if is_known_binary_content_type(&ct) {
+                // SVG/XML/JSON look binary to the mime list but are text we
+                // can deliver verbatim; let classification handle them.
+                if is_known_binary_content_type(&ct) && !is_textual_content_type(&ct) {
                     let bytes = response.bytes().await.map_err(|e| {
                         error!(error = %e, url = %url, "Failed to read response body");
                         RetryErr::Permanent(DaedraError::HttpError(e))
@@ -600,6 +643,12 @@ fn classify_inferred_mime(mime: &str, bytes: &[u8]) -> Option<FetchedContent> {
         "text/html" | "application/xhtml+xml" => {
             Some(FetchedContent::Html(bytes_to_utf8_string(bytes)))
         },
+        // SVG and other textual XML are content, not opaque binaries: hand
+        // the source to the caller instead of "unsupported content type".
+        m if is_textual_content_type(m) => Some(FetchedContent::Text {
+            mime: m.to_string(),
+            body: bytes_to_utf8_string(bytes),
+        }),
         m if is_binary_mime(m) => Some(FetchedContent::Binary {
             mime: m.to_string(),
             size: bytes.len(),
@@ -613,10 +662,23 @@ fn classify_by_inference(kind: &infer::Type, bytes: &[u8]) -> Option<FetchedCont
     classify_inferred_mime(kind.mime_type(), bytes)
 }
 
+/// True for textual structured mimes (SVG, XML, JSON) that should reach the
+/// caller verbatim instead of being rejected as binaries.
+fn is_textual_content_type(ct: &str) -> bool {
+    ct.contains("svg") || ct.contains("xml") || ct.contains("json")
+}
+
 fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
     let ct = normalize_content_type(content_type);
     if ct.contains("text/html") {
         return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
+    }
+
+    if is_textual_content_type(&ct) {
+        return Ok(FetchedContent::Text {
+            mime: ct,
+            body: bytes_to_utf8_string(bytes),
+        });
     }
 
     if std::str::from_utf8(bytes).is_ok() {
@@ -1455,7 +1517,15 @@ mod tests {
     fn test_classify_inferred_mime_text_xml() {
         let bytes = b"<?xml version=\"1.0\"?><root/>";
         let result = classify_inferred_mime("text/xml", bytes);
-        assert!(matches!(result, Some(FetchedContent::Html(_))));
+        // XML now arrives verbatim (Text), not through HTML extraction.
+        assert!(matches!(result, Some(FetchedContent::Text { .. })));
+    }
+
+    #[test]
+    fn test_classify_inferred_mime_svg_is_text() {
+        let bytes = b"<svg xmlns='http://www.w3.org/2000/svg'/>";
+        let result = classify_inferred_mime("image/svg+xml", bytes);
+        assert!(matches!(result, Some(FetchedContent::Text { mime, .. }) if mime.contains("svg")));
     }
 
     #[test]

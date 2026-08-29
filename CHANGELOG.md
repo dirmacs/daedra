@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-29
+
+### Added
+- Three general-web backends with no API key: Mojeek (independent index, HTML), Brave (HTML), and Marginalia (public API, answers from any IP). The chain is now 16 backends, 14 without keys.
+- Cross-engine corroboration in the merge: the same page found by two engines outranks an otherwise equal single-engine hit. Dedup now keys on the canonical URL (host without www, no trailing slash, tracking parameters stripped), so `example.com/x` and `www.example.com/x/?utm_source=y` are one result.
+
+### Changed
+- The unkeyed search story is now stated plainly in README and `check`: Marginalia answers from any IP; Mojeek and Brave serve residential IPs and refuse datacenter ones; the circuit breaker sidelines them where refused.
+
+
+## [0.3.14] - 2026-08-29
+
+### Added
+- `-f json` and `-f json-compact` now work on `info` and `check`. `info` lists the real four MCP tools; `check` prints the same report machine-readably.
+- `check` reports missing `SERPER_API_KEY`, `TAVILY_API_KEY`, and `GITHUB_TOKEN`, and says plainly that unkeyed search is not general web search.
+- `fetch --timeout SECONDS` sets a per-request timeout. The default path is unchanged.
+- SVG, XML, and JSON responses arrive verbatim in a code fence. They no longer fail with "Unsupported content type".
+
+### Fixed
+- `serve --transport sse --host localhost` works. The host parser resolves hostnames to IPv4 instead of accepting dotted quads only.
+
+### Docs
+- The README no longer claims "first backend that returns results wins". It describes the relevance-ranked merge, names the 13 backends, and states the unkeyed search scope honestly.
+
+## [0.3.13] - 2026-08-29
+
 ## [0.3.13] - 2026-08-29
 
 ### Fixed
