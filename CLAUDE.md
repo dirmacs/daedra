@@ -1,6 +1,6 @@
 # daedra
 
-Self-contained web search MCP server. 16 backends with automatic fallback. Works from any IP. No API keys are required for basic search.
+Self-contained web search MCP server. 16 backends with automatic fallback. Marginalia answers from any IP; Mojeek and Brave need a residential IP. No API keys are required for basic search.
 
 ## Build and test
 
@@ -14,7 +14,7 @@ cargo clippy -- -D warnings
 
 Single crate with modular backends: Serper, Tavily, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackExchange, GitHub, Wiby, DDG Instant, DuckDuckGo HTML. `SearchProvider` runs the fallback chain. Per-backend circuit breakers (`BackendHealth`), governor keyed rate limits, and classified retry (transient errors only) keep the chain stable.
 
-`FetchClient` classifies responses as `FetchedContent` (Html / Pdf / Binary). HTML uses dom_smoothie Readability extraction. PDFs use infer + pdf-extract. Binary types fail with a typed error.
+`FetchClient` classifies responses as `FetchedContent` (Html / Pdf / Document / Text / Binary). HTML uses dom_smoothie Readability extraction. PDFs use infer + pdf-inspector (Markdown out). Office/ebook documents use anydoc. Textual SVG/XML/JSON come back verbatim. Zip containers typed as application/zip are sniffed for embedded office formats. Binary types fail with a typed error.
 
 The MCP server (`DaedraHandler` in `server.rs`) exposes `web_search`, `visit_page`, and `crawl_site`. `search_duckduckgo` is a backward-compatibility alias for `web_search`. Transports: STDIO and SSE (Axum). The moka async cache layer caches results.
 
@@ -39,5 +39,5 @@ The MCP server (`DaedraHandler` in `server.rs`) exposes `web_search`, `visit_pag
 - No hardcoded paths. All configuration comes from environment variables or CLI arguments.
 - Async runtime: tokio
 - Release profile: LTO, codegen-units=1, strip=true
-- Extraction deps: `dom_smoothie` 0.17, `infer` 0.19, `pdf-extract` 0.12. RSS parsing: `quick-xml` 0.42. Rate limiting: `governor` 0.10.
+- Extraction deps: `dom_smoothie` 0.17, `infer` 0.19, `pdf-inspector` 1.17 (PDF), `anydoc` 0.2 (Office/ebook). RSS parsing: `quick-xml` 0.42. Rate limiting: `governor` 0.10.
 - MSRV: Rust 1.98 (same toolchain as the rest of the DIRMACS Rust stack)
