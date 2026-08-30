@@ -760,4 +760,28 @@ mod mojeek_wall {
             "clearance cookie must be replayed, got {cookie:?}"
         );
     }
+
+    #[tokio::test]
+    async fn mojeek_unknown_empty_reports_fingerprint() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                br#"<html><body><div id="app">Please wait while we check your connection</div></body></html>"#
+                    .to_vec(),
+                "text/html",
+            ))
+            .mount(&server)
+            .await;
+        let backend = MojeekBackend::with_base_url(format!("{}/search", server.uri()));
+        let err = backend
+            .search(&args())
+            .await
+            .expect_err("unknown empty must name the page");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("did not parse as results") && msg.contains("Please wait"),
+            "expected fingerprint snippet, got {msg}"
+        );
+    }
 }
