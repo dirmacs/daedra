@@ -704,4 +704,60 @@ mod mojeek_wall {
             .expect("Accept header must be sent");
         assert!(accept.1.to_str().unwrap().contains("text/html"));
     }
+
+    #[tokio::test]
+    async fn mojeek_follows_meta_refresh_handoff_with_cookie() {
+        let server = MockServer::start().await;
+        // Layer-2 wall page: sets a clearance cookie and hands the browser to
+        // the real SERP with a no-JS meta refresh.
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("set-cookie", "mjwall=cleared")
+                    .set_body_raw(
+                        br#"<html><head><meta http-equiv="refresh" content="0; url=/real?q=tokio"></head>
+                            <body>Verifying your browser</body></html>"#
+                            .to_vec(),
+                        "text/html",
+                    ),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/real"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    br#"<html><body><div class="results"><div class="results-standard">
+                    <article><a class="ob" href="https://tokio.rs/"><h2>Tokio</h2></a>
+                    <p class="s">runtime</p></article></div></div></body></html>"#
+                        .to_vec(),
+                    "text/html",
+                ),
+            )
+            .mount(&server)
+            .await;
+        let backend = MojeekBackend::with_base_url(format!("{}/search", server.uri()));
+        let resp = backend
+            .search(&args())
+            .await
+            .expect("handoff must reach the real SERP");
+        assert_eq!(resp.data.len(), 1);
+        assert_eq!(resp.data[0].url, "https://tokio.rs/");
+        // The handoff request must carry the wall's clearance cookie.
+        let requests = server.received_requests().await.expect("requests recorded");
+        let handoff = requests
+            .iter()
+            .find(|r| r.url.path() == "/real")
+            .expect("handoff request recorded");
+        let cookie = handoff
+            .headers
+            .iter()
+            .find(|(name, _)| name.as_str() == "cookie")
+            .map(|(_, value)| value.to_str().unwrap().to_string());
+        assert!(
+            cookie.clone().is_some_and(|c| c.contains("mjwall=cleared")),
+            "clearance cookie must be replayed, got {cookie:?}"
+        );
+    }
 }
