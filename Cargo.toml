@@ -1,9 +1,9 @@
 [package]
 name = "daedra"
-version = "0.5.6"
+version = "0.5.7"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
-description = "Self-contained web search MCP server. 15 backends with automatic fallback. Works from any IP."
+description = "Self-contained web search MCP server. 14 unkeyed backends with automatic fallback. Works from any IP."
 license = "MIT"
 repository = "https://github.com/dirmacs/daedra"
 homepage = "https://dirmacs.github.io/daedra"

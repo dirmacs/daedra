@@ -2,7 +2,7 @@
 //!
 //! This module provides web search functionality using DuckDuckGo's
 //! HTML interface. Note: DDG blocks datacenter/VPS IPs since mid-2025.
-//! Use as fallback only — prefer Bing/Serper/Tavily backends.
+//! Use as fallback only — prefer Mwmbl and machine-format backends.
 
 use super::backend::SearchBackend;
 use crate::types::{

@@ -1,12 +1,10 @@
 //! Tool implementations for Daedra.
 //!
 //! Search backends (in fallback order):
-//! 1. Serper.dev — Google results via API (needs SERPER_API_KEY)
-//! 2. Tavily — AI-optimized search (needs TAVILY_API_KEY)
-//! 3. Bing HTML scraping — no key, but blocked from most datacenter IPs
-//! 4. Wikipedia — always works, knowledge-focused
-//! 5. StackExchange — always works, technical Q&A
-//! 6. DuckDuckGo — blocked from datacenter IPs, last resort
+//! 1. Mwmbl JSON — no key, general web from any IP
+//! 2. Brave / Bing / Google / DuckDuckGo HTML — no key, may meet a CAPTCHA
+//! 3. Marginalia, Bing RSS, Google News, Hacker News — machine formats
+//! 4. Wikipedia, StackExchange, GitHub, Wiby, DDG Instant — knowledge APIs
 
 pub mod backend;
 pub mod bing;
@@ -17,12 +15,11 @@ pub mod fetch;
 pub mod github;
 pub mod google;
 pub mod marginalia;
+pub mod mwmbl;
 pub mod rss;
 pub mod search;
-pub mod serper;
 pub mod soft_block;
 pub mod stackexchange;
-pub mod tavily;
 pub mod wiby;
 pub mod wikipedia;
 

@@ -98,19 +98,11 @@ impl SafeSearchLevel {
             SafeSearchLevel::Strict => "strict",
         }
     }
-
-    /// Convert to Serper's `safeSearch` JSON field value
-    pub fn to_serper_value(&self) -> &'static str {
-        match self {
-            SafeSearchLevel::Off => "off",
-            SafeSearchLevel::Moderate | SafeSearchLevel::Strict => "active",
-        }
-    }
 }
 
 /// Split a DuckDuckGo-style region tag (`"us-en"`, `"wt-wt"`) into an
 /// optional ISO country code (`gl`) and language code (`hl`), as used by
-/// Google and Serper. Worldwide (`"wt-wt"`) yields no `gl`.
+/// Google. Worldwide (`"wt-wt"`) yields no `gl`.
 pub fn region_to_gl_hl(region: &str) -> (Option<String>, Option<String>) {
     let mut parts = region.splitn(2, '-');
     let geo = parts.next().unwrap_or_default();
