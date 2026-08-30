@@ -60,7 +60,7 @@ impl MarginaliaBackend {
     pub fn with_base_url(base_url: String) -> Self {
         let client = Client::builder()
             .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(20))
+            .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
         Self { client, base_url }

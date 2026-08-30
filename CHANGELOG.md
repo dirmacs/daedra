@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-08-30
+
+### Fixed
+- Mojeek parsing now falls back to any `a.ob` title link on the page. The LLM-results layout has no `.results-standard` wrapper; the previous parser treated a healthy page as empty and reported bot protection.
+- Tracking wrappers (`/url?url=`) unwrap to the destination URL.
+- An unparseable Mojeek page now reports a fingerprint (length, class flags, body snippet) instead of a generic bot-protection error. The next log names the layout.
+- Marginalia timeout raised from 20s to 30s. Slow routes were hitting the cutoff and then retrying for another 20s.
+
+
 ## [0.5.4] - 2026-08-30
 
 ### Fixed
