@@ -484,9 +484,6 @@ mod issue9 {
         assert_eq!(SafeSearchLevel::Off.to_bing_value(), "off");
         assert_eq!(SafeSearchLevel::Moderate.to_bing_value(), "moderate");
         assert_eq!(SafeSearchLevel::Strict.to_bing_value(), "strict");
-        assert_eq!(SafeSearchLevel::Off.to_serper_value(), "off");
-        assert_eq!(SafeSearchLevel::Moderate.to_serper_value(), "active");
-        assert_eq!(SafeSearchLevel::Strict.to_serper_value(), "active");
         assert_eq!(safe_param(SafeSearchLevel::Off), Some("off"));
         assert_eq!(safe_param(SafeSearchLevel::Moderate), None);
         assert_eq!(safe_param(SafeSearchLevel::Strict), Some("active"));

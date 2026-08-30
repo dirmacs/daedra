@@ -1,10 +1,10 @@
 //! Search backend trait and multi-backend provider.
 //!
 //! Daedra supports multiple search backends with automatic fallback:
-//! - Bing HTML scraping (default, no API key needed)
-//! - Serper.dev (Google results via API, needs SERPER_API_KEY)
-//! - Tavily (AI-optimized search, needs TAVILY_API_KEY)
-//! - DuckDuckGo HTML scraping (blocked from datacenter IPs, fallback only)
+//! - Mwmbl public JSON (general web, no API key)
+//! - Marginalia, Bing RSS, Google News, Hacker News (machine formats)
+//! - Brave / Bing / Google / DuckDuckGo HTML (no key; may meet a CAPTCHA)
+//! - Wikipedia, StackExchange, GitHub, Wiby, DDG Instant (knowledge APIs)
 
 use crate::types::{DaedraError, DaedraResult, SearchArgs, SearchResponse};
 use async_trait::async_trait;
@@ -65,14 +65,12 @@ impl BackendHealth {
 
 /// Per-backend rate limits keyed by backend name (category-specific quotas).
 struct BackendRateLimiters {
-    api: DefaultKeyedRateLimiter<String>,
     knowledge: DefaultKeyedRateLimiter<String>,
 }
 
 impl BackendRateLimiters {
     fn new() -> Arc<Self> {
         Arc::new(Self {
-            api: Self::api_limiter(),
             knowledge: Self::knowledge_limiter(),
         })
     }
@@ -86,11 +84,6 @@ impl BackendRateLimiters {
         )
     }
 
-    /// API backends (serper, tavily): 2 req / s sustained, burst 2.
-    fn api_limiter() -> DefaultKeyedRateLimiter<String> {
-        RateLimiter::dashmap(Quota::per_second(NonZeroU32::new(2).unwrap()))
-    }
-
     /// Knowledge backends: 2 req / s sustained, burst 2.
     fn knowledge_limiter() -> DefaultKeyedRateLimiter<String> {
         RateLimiter::dashmap(Quota::per_second(NonZeroU32::new(2).unwrap()))
@@ -101,7 +94,6 @@ impl BackendRateLimiters {
         match name {
             // Scraper backends use the moderate default keyed limiter on SearchProvider.
             "bing" | "duckduckgo" => scraper_default.until_key_ready(&key).await,
-            "serper" | "tavily" => self.api.until_key_ready(&key).await,
             _ => self.knowledge.until_key_ready(&key).await,
         }
     }
@@ -199,21 +191,9 @@ impl SearchProvider {
     pub fn auto() -> Self {
         let mut backends: Vec<Box<dyn SearchBackend>> = Vec::new();
 
-        // Serper (Google results) — if API key is set
-        if let Ok(key) = std::env::var("SERPER_API_KEY")
-            && !key.is_empty()
-        {
-            info!("Serper backend enabled (SERPER_API_KEY set)");
-            backends.push(Box::new(super::serper::SerperBackend::new(key)));
-        }
-
-        // Tavily — if API key is set
-        if let Ok(key) = std::env::var("TAVILY_API_KEY")
-            && !key.is_empty()
-        {
-            info!("Tavily backend enabled (TAVILY_API_KEY set)");
-            backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
-        }
+        // Mwmbl public JSON — unkeyed general web index. Answers from any IP.
+        info!("Mwmbl backend enabled (no API key, answers from any IP)");
+        backends.push(Box::new(super::mwmbl::MwmblBackend::new()));
 
         // Brave HTML — general index, no API key; 429s from datacenter IPs.
         info!("Brave backend enabled (no API key, may rate-limit datacenter IPs)");
@@ -938,12 +918,13 @@ mod tests {
     fn test_auto_has_backends() {
         let provider = SearchProvider::auto();
         let backends = provider.available_backends();
-        // Should always have at least 7 no-key backends
-        assert!(
-            backends.len() >= 7,
-            "Expected at least 7 backends, got {}",
+        assert_eq!(
+            backends.len(),
+            14,
+            "Expected 14 unkeyed backends, got {}",
             backends.len()
         );
+        assert!(backends.contains(&"mwmbl"));
         assert!(backends.contains(&"bing"));
         assert!(backends.contains(&"wikipedia"));
         assert!(backends.contains(&"stackoverflow"));
@@ -954,6 +935,14 @@ mod tests {
         assert!(
             !backends.contains(&"mojeek"),
             "Mojeek HTML scrape was removed; it served CAPTCHAs to this client"
+        );
+        assert!(
+            !backends.contains(&"serper"),
+            "paid search keys were removed from the crate"
+        );
+        assert!(
+            !backends.contains(&"tavily"),
+            "paid search keys were removed from the crate"
         );
     }
 

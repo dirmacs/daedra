@@ -525,13 +525,12 @@ fn check_search_client(reporter: &CheckReporter) -> bool {
     }
 }
 
-/// Report which optional API keys are set. A missing key is not a failure —
-/// unkeyed search still works — but `check` must not hide the quality cliff.
+/// Report which optional quota tokens are set. A missing token is not a
+/// failure — search still runs on public endpoints.
 fn check_api_keys(reporter: &CheckReporter) {
     let keys = [
-        ("SERPER_API_KEY", "Serper (top-tier Google results)"),
-        ("TAVILY_API_KEY", "Tavily (LLM-oriented search)"),
         ("GITHUB_TOKEN", "GitHub (higher rate limits)"),
+        ("MARGINALIA_API_KEY", "Marginalia (higher rate limits)"),
     ];
     let mut any_set = false;
     for (name, what) in keys {
@@ -539,22 +538,21 @@ fn check_api_keys(reporter: &CheckReporter) {
             reporter.ok(&format!("{name} set ({what})"));
             any_set = true;
         } else {
-            reporter.warn(&format!("{name} not set — {what} disabled"));
+            reporter.warn(&format!("{name} not set — {what} use the public pool"));
         }
     }
     if !any_set {
         reporter.warn(
-            "No API keys set: search runs on unkeyed backends only (wiki, HN, SO, \
-             GitHub, RSS) — not general web search",
+            "No quota tokens set. Search uses public endpoints. GitHub uses the unauthenticated pool.",
         );
     }
     reporter.entry(
         "api_keys",
         true,
         if any_set {
-            "at least one API key set"
+            "at least one quota token set"
         } else {
-            "no API keys set"
+            "no quota tokens set"
         },
     );
 }

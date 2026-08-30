@@ -2,7 +2,7 @@
 
 ## What this is
 
-Daedra is a web search MCP server. It gives search and fetch tools to AI agents via MCP (Model Context Protocol). Thirteen backends run in a fallback chain. Circuit breakers and per-backend rate limits keep search reliable from any IP.
+Daedra is a web search MCP server. It gives search and fetch tools to AI agents via MCP (Model Context Protocol). Fourteen unkeyed backends run in a fallback chain. Circuit breakers and per-backend rate limits keep search reliable from any IP.
 
 ## Rules for agents
 

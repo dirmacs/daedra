@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-08-30
+
+### Added
+- Mwmbl JSON backend. The public API (`api.mwmbl.org`) needs no key and returns general web results from any IP.
+
+### Removed
+- Serper and Tavily backends. Paid search keys added complexity. Search is unkeyed. Optional `GITHUB_TOKEN` and `MARGINALIA_API_KEY` still raise rate limits.
+
 ## [0.5.6] - 2026-08-30
 
 ### Removed
