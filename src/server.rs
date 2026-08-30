@@ -190,7 +190,7 @@ impl DaedraHandler {
             McpTool {
                 name: "web_search".to_string(),
                 description: Some(
-                    "Search the web across 14 backends (Mojeek, Brave, Marginalia, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackOverflow, GitHub, Wiby, DDG Instant, DDG; plus Serper and Tavily with API keys). Results merge by relevance with cross-engine corroboration."
+                    "Search the web across 13 backends (Brave, Marginalia, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackOverflow, GitHub, Wiby, DDG Instant, DDG; plus Serper and Tavily with API keys). Results merge by relevance with cross-engine corroboration."
                         .to_string(),
                 ),
                 input_schema: search_args_schema(),
@@ -198,7 +198,7 @@ impl DaedraHandler {
             McpTool {
                 name: "search_duckduckgo".to_string(),
                 description: Some(
-                    "Alias for web_search (backward compatibility). Search the web across 14 backends (Mojeek, Brave, Marginalia, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackOverflow, GitHub, Wiby, DDG Instant, DDG; plus Serper and Tavily with API keys). Results merge by relevance with cross-engine corroboration."
+                    "Alias for web_search (backward compatibility). Search the web across 13 backends (Brave, Marginalia, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackOverflow, GitHub, Wiby, DDG Instant, DDG; plus Serper and Tavily with API keys). Results merge by relevance with cross-engine corroboration."
                         .to_string(),
                 ),
                 input_schema: search_args_schema(),

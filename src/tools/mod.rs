@@ -17,7 +17,6 @@ pub mod fetch;
 pub mod github;
 pub mod google;
 pub mod marginalia;
-pub mod mojeek;
 pub mod rss;
 pub mod search;
 pub mod serper;

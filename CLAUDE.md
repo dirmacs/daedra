@@ -1,6 +1,6 @@
 # daedra
 
-Self-contained web search MCP server. 16 backends with automatic fallback. Marginalia answers from any IP; Mojeek and Brave need a residential IP. No API keys are required for basic search.
+Self-contained web search MCP server. 15 backends with automatic fallback. Marginalia answers from any IP. Brave HTML may rate-limit. No API keys are required for basic search.
 
 ## Build and test
 
@@ -12,7 +12,7 @@ cargo clippy -- -D warnings
 
 ## Architecture
 
-Single crate with modular backends: Serper, Tavily, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackExchange, GitHub, Wiby, DDG Instant, DuckDuckGo HTML. `SearchProvider` runs the fallback chain. Per-backend circuit breakers (`BackendHealth`), governor keyed rate limits, and classified retry (transient errors only) keep the chain stable.
+Single crate with modular backends: Serper, Tavily, Brave, Marginalia, Bing RSS, Bing, Google News, Hacker News, Google, Wikipedia, StackExchange, GitHub, Wiby, DDG Instant, DuckDuckGo HTML. `SearchProvider` runs the fallback chain. Per-backend circuit breakers (`BackendHealth`), governor keyed rate limits, and classified retry (transient errors only) keep the chain stable.
 
 `FetchClient` classifies responses as `FetchedContent` (Html / Pdf / Document / Text / Binary). HTML uses dom_smoothie Readability extraction. PDFs use infer + pdf-inspector (Markdown out). Office/ebook documents use anydoc. Textual SVG/XML/JSON come back verbatim. Zip containers typed as application/zip are sniffed for embedded office formats. Binary types fail with a typed error.
 

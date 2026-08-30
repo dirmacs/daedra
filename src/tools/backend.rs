@@ -215,12 +215,6 @@ impl SearchProvider {
             backends.push(Box::new(super::tavily::TavilyBackend::new(key)));
         }
 
-        // Mojeek — independent crawler index, no API key, bot-tolerant from
-        // residential IPs; 403s from datacenter IPs (circuit breaker then
-        // sidelines it).
-        info!("Mojeek backend enabled (no API key, independent index)");
-        backends.push(Box::new(super::mojeek::MojeekBackend::new()));
-
         // Brave HTML — general index, no API key; 429s from datacenter IPs.
         info!("Brave backend enabled (no API key, may rate-limit datacenter IPs)");
         backends.push(Box::new(super::brave::BraveBackend::new()));
@@ -957,6 +951,10 @@ mod tests {
         assert!(backends.contains(&"wiby"));
         assert!(backends.contains(&"ddg-instant"));
         assert!(backends.contains(&"duckduckgo"));
+        assert!(
+            !backends.contains(&"mojeek"),
+            "Mojeek HTML scrape was removed; it served CAPTCHAs to this client"
+        );
     }
 
     #[test]

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-08-30
+
+### Removed
+- Mojeek HTML backend. A residential test showed a CAPTCHA page (~5.5 KB, heading Captcha). Datacenter IPs receive a 403. The scraper did not return results. This project does not solve CAPTCHAs. The official Mojeek API is a paid product and is not a drop-in replacement.
+
 ## [0.5.5] - 2026-08-30
 
 ### Fixed
