@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-08-30
+
+### Fixed
+- Mojeek keeps its session cookies. The client dropped `Set-Cookie` between requests, so any wall that clears a browser by handing out a cookie always failed. The client now keeps the cookie jar for the process lifetime.
+- Mojeek's no-JavaScript handoff is followed. A wall page that redirects with a meta refresh now leads to the real results page instead of a dead end.
+
+
 ## [0.5.3] - 2026-08-29
 
 ### Fixed

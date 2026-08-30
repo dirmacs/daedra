@@ -141,6 +141,9 @@ impl MojeekBackend {
         let client = Client::builder()
             .user_agent(USER_AGENT)
             .default_headers(browser_default_headers())
+            // Keep the session: walls that hand out a clearance cookie via
+            // Set-Cookie fail when the client drops it between requests.
+            .cookie_store(true)
             .timeout(Duration::from_secs(30))
             .gzip(true)
             .brotli(true)
@@ -164,6 +167,29 @@ impl MojeekBackend {
 impl Default for MojeekBackend {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl MojeekBackend {
+    /// Extract the redirect target of a no-JS `<meta http-equiv="refresh">`
+    /// handoff. Relative targets resolve against the configured base URL.
+    fn meta_refresh_target(&self, html: &str) -> Option<String> {
+        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let re = RE.get_or_init(|| {
+            regex::Regex::new(
+                r#"(?is)<meta[^>]+http-equiv=["']?refresh["']?[^>]*content=["'][^"']*url=([^"'>]+)"#,
+            )
+            .unwrap()
+        });
+        let raw = re.captures(html)?.get(1)?.as_str().trim().to_string();
+        if raw.is_empty() {
+            return None;
+        }
+        url::Url::parse(&self.base_url)
+            .ok()?
+            .join(&raw)
+            .ok()
+            .map(|u| u.to_string())
     }
 }
 
@@ -230,7 +256,23 @@ impl SearchBackend for MojeekBackend {
             )));
         }
 
-        let html = resp.text().await.map_err(DaedraError::HttpError)?;
+        let mut html = resp.text().await.map_err(DaedraError::HttpError)?;
+
+        // A no-JavaScript challenge page hands the browser to the real SERP
+        // with a meta refresh. Follow exactly one hop; a loop or a second
+        // refresh means the wall stays up and the soft-block path reports it.
+        if let Some(target) = self.meta_refresh_target(&html) {
+            info!(target = %target, "Following Mojeek meta-refresh handoff");
+            let resp2 = self
+                .client
+                .get(&target)
+                .send()
+                .await
+                .map_err(DaedraError::HttpError)?;
+            if resp2.status().is_success() {
+                html = resp2.text().await.map_err(DaedraError::HttpError)?;
+            }
+        }
 
         let results = self.parse_results(&html, opts.num_results);
 

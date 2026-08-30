@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "daedra"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anydoc",
  "anyhow",
@@ -3360,6 +3360,8 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "cookie",
+ "cookie_store",
  "futures-core",
  "http",
  "http-body",

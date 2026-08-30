@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 13 backends with automatic fallback. Works from any IP."
@@ -26,7 +26,7 @@ path = "src/main.rs"
 tokio = { version = "1.48.0", features = ["full", "rt-multi-thread", "macros", "sync", "time", "signal"] }
 
 # HTTP client for web fetching
-reqwest = { version = "0.12.24", features = ["json", "gzip", "brotli", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12.24", features = ["json", "gzip", "brotli", "rustls-tls", "cookies"], default-features = false }
 
 # HTML parsing and content extraction
 scraper = "0.24.0"
