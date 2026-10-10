@@ -30,7 +30,7 @@ reqwest = { version = "0.12.24", features = ["json", "gzip", "brotli", "rustls-t
 
 # HTML parsing and content extraction
 scraper = "0.24.0"
-html5ever = "0.36.1"
+html5ever = "0.39.0"
 
 # URL parsing
 url = "2.5.7"
