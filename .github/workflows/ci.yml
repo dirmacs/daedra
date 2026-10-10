@@ -198,25 +198,136 @@ jobs:
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
+    env:
+      # Repo-specific constants, measured on the first run — see the PR that
+      # added this job for the numbers and the ratchet.
+      #
+      # Measured under tarpaulin 0.37.5 / ptrace on the build host
+      # (--all-features, non-integration suite):
+      #   line coverage 63.72% (1823/2861 lines); 339 tests, all passing.
+      #   worst CRAP 380.0 = `crawl_site`
+      #   (src/tools/crawl.rs:521, CC 19, 0% coverage).
+      COVERAGE_FLOOR: "61"
+      CRAP_THRESHOLD: "420"
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          # llvm-tools-preview backs the llvm engine (llvm-profdata/llvm-cov
+          # under the hood) used by the coverage gate below.
           components: llvm-tools-preview
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-coverage-
 
-      - name: Generate coverage report
-        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --skip integration
+      - name: Cargo.lock is committed, not generated
+        # --locked below exits non-zero if the lockfile is missing or would
+        # have to change, so the dependency set can only move when a human
+        # commits a reviewed lockfile. That mechanism needs the file to exist.
+        run: git ls-files --error-unmatch Cargo.lock
+
+      - name: install pinned coverage + CRAP tools
+        run: |
+          set -euo pipefail
+          TARPAULIN_VERSION=0.37.5
+          CRAP_VERSION=0.6.1
+          case "$(uname -m)" in
+            aarch64) arch=aarch64 ;;
+            x86_64)  arch=x86_64 ;;
+            *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.local/bin"
+          # $GITHUB_PATH only affects LATER steps, not this one -- the version
+          # assertions below run here, so the dir must be on PATH inside this
+          # same script.
+          export PATH="$HOME/.local/bin:$PATH"
+          curl -sSLf "https://github.com/xd009642/tarpaulin/releases/download/${TARPAULIN_VERSION}/cargo-tarpaulin-${arch}-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$HOME/.local/bin"
+          curl -sSLf "https://github.com/minikin/cargo-crap/releases/download/v${CRAP_VERSION}/cargo-crap-${arch}-unknown-linux-gnu.tar.gz" \
+            | tar xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cargo-tarpaulin --version | grep -qx "tarpaulin ${TARPAULIN_VERSION}"
+          cargo-crap --version | grep -qx "cargo-crap ${CRAP_VERSION}"
+
+      - name: coverage gate (tarpaulin, llvm engine)
+        # One instrumented run does two jobs: tarpaulin exits non-zero on any
+        # test failure (so this run IS the test run) and its LCOV feeds the
+        # CRAP gate below. `--fail-under` makes coverage a gate instead of a
+        # number in a comment.
+        #
+        # Single-package repo (no workspace members), so no --workspace.
+        # `-- --skip integration`: the integration tests hit live search
+        # backends / example.com / arXiv and are not hermetically runnable --
+        # this repo's test job gates on the same `--skip integration` filter
+        # and its integration-test job is continue-on-error, so the gate
+        # covers exactly the suite the repo already gates on.
+        #
+        # Engine is Llvm, estate-wide: tarpaulin's ptrace engine fails inside
+        # the confined runner containers ("ASLR disable failed: EPERM"), and
+        # Llvm is the documented source-based path whose llvm-tools component
+        # the toolchain step above installs.
+        run: >-
+          cargo tarpaulin --engine Llvm --all-features --locked
+          --out Lcov --fail-under "$COVERAGE_FLOOR" --timeout 300
+          -- --skip integration
+
+      - name: CRAP gate (fed by this run's coverage)
+        # cargo-crap never runs tests; it scores CRAP(m) = CC^2*(1-cov)^3 + CC
+        # from the source AST plus the lcov.info above, so without the coverage
+        # feed every function would score cov=0 and the ceiling would measure
+        # nothing. No file is excluded: src/main.rs (the clap entry point)
+        # peaks at CRAP 99.5, far under the 420 ceiling; the worst entry is
+        # crawl_site at 380 (src/tools/crawl.rs:521, CC 19, 0% covered, behind
+        # the opt-in crawlberg feature). The ceiling was proven able to fail
+        # before merge: at threshold 100 this tree exits 1; at 420 it exits 0.
+        run: >-
+          cargo crap --lcov lcov.info
+          --threshold "$CRAP_THRESHOLD" --fail-above
+          --format json > crap.json
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: lcov.info
           fail_ci_if_error: false
+
+      - name: write the run summary
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "### Coverage + CRAP gate"
+            echo
+            if [ -f lcov.info ]; then
+              awk -F: '/^LH:/{lh+=$2} /^LF:/{lf+=$2} END {if (lf>0) printf "Line coverage: %.2f%% (%d/%d lines)\n", 100*lh/lf, lh, lf; else print "Line coverage: no LCOV data"}' lcov.info
+            else
+              echo "Line coverage: no lcov.info (the coverage run did not complete)"
+            fi
+            if [ -f crap.json ]; then
+              # Shell-only parse: runner images may carry no python3, and a
+              # crashing summary must not redden a gate that passed.
+              vals=$(tr -d ' \n' < crap.json | grep -o '"crap":[0-9.]*' | cut -d: -f2)
+              if [ -n "$vals" ]; then
+                n=$(printf '%s\n' "$vals" | grep -c .)
+                worst=$(printf '%s\n' "$vals" | sort -g | tail -1)
+                echo "Functions scored: $n; worst CRAP: $worst; threshold $CRAP_THRESHOLD"
+              else
+                echo "WARNING: crap.json present but no entries parsed"
+              fi
+            else
+              echo "CRAP: no crap.json (the CRAP step did not complete)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   msrv:
     name: Minimum Supported Rust Version
