@@ -101,6 +101,7 @@ impl BackendRateLimiters {
 
 /// Trait for search backends. Each backend implements web search
 /// and returns results in the common SearchResponse format.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait SearchBackend: Send + Sync {
     /// Execute a search query and return results.
