@@ -16,6 +16,7 @@ pub mod github;
 pub mod google;
 pub mod marginalia;
 pub mod mwmbl;
+pub mod parallel;
 pub mod rss;
 pub mod search;
 pub mod soft_block;
