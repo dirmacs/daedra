@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- The minimum supported Rust version is now 1.99. Measured before the bump: three consecutive `cargo test --locked` runs on 1.99.0 passed 343 tests with 0 failures (278 + 20 + 13 + 9 + 19 + 4), and `cargo check --locked` finished clean, so the old `1.98` pin was stale rather than load-bearing. The `msrv` CI job, `clippy.toml`, the `Dockerfile` builder image, `CONTRIBUTING.md`, and `CLAUDE.md` now all say 1.99; a partial bump would have left the pin and its enforcement disagreeing.
+
 ## [0.5.7] - 2026-08-30
 
 ### Added

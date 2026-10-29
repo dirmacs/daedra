@@ -40,7 +40,7 @@ Enhancement suggestions live in GitHub issues. Include this information:
 
 Prerequisites:
 
-- Rust 1.98 or later
+- Rust 1.99 or later
 - Cargo (ships with Rust)
 - Git
 
