@@ -11,7 +11,7 @@ documentation = "https://docs.rs/daedra"
 readme = "README.md"
 keywords = ["mcp", "duckduckgo", "search", "ai", "cli"]
 categories = ["command-line-utilities", "web-programming", "development-tools"]
-rust-version = "1.98"
+rust-version = "1.99"
 
 [lib]
 name = "daedra"

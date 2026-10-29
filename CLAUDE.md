@@ -40,4 +40,4 @@ The MCP server (`DaedraHandler` in `server.rs`) exposes `web_search`, `visit_pag
 - Async runtime: tokio
 - Release profile: LTO, codegen-units=1, strip=true
 - Extraction deps: `dom_smoothie` 0.17, `infer` 0.19, `pdf-inspector` 1.17 (PDF), `anydoc` 0.2 (Office/ebook). RSS parsing: `quick-xml` 0.42. Rate limiting: `governor` 0.10.
-- MSRV: Rust 1.98 (same toolchain as the rest of the DIRMACS Rust stack)
+- MSRV: Rust 1.99 (same toolchain as the rest of the DIRMACS Rust stack)

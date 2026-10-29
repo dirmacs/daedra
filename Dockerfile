@@ -1,6 +1,6 @@
 # Build stage: compile daedra inside the image. No pre-built host binary is
 # needed — `docker build` works from a clean checkout.
-FROM rust:1.98-slim AS builder
+FROM rust:1.99-slim AS builder
 WORKDIR /build
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
