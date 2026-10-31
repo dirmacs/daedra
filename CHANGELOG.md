@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - The minimum supported Rust version is now 1.99. Measured before the bump: three consecutive `cargo test --locked` runs on 1.99.0 passed 343 tests with 0 failures (278 + 20 + 13 + 9 + 19 + 4), and `cargo check --locked` finished clean, so the old `1.98` pin was stale rather than load-bearing. The `msrv` CI job, `clippy.toml`, the `Dockerfile` builder image, `CONTRIBUTING.md`, and `CLAUDE.md` now all say 1.99; a partial bump would have left the pin and its enforcement disagreeing.
 
+## [0.5.11] - 2026-10-31
+
+### Fixed
+- An empty or whitespace-only query returned a transport error instead of an empty result set. `perform_search` dispatched the degenerate query to the backends, whose unparseable pages surfaced as `Err`, so a caller passing an empty string could not tell a bad input from a provider outage. It now answers directly with an empty `SearchResponse`. This was a behaviour change from the 0.1.x line, where the same call returned an empty envelope.
+- Brave returned zero results for every query. `RESULT_SELECTOR` was anchored to `#results`, which Brave's current SERP no longer emits; result cards live under `#search-page`. Because the container anchor never matched, `parse_results` returned empty and `soft_block::classify` then found the words "no results" elsewhere on the page and reported a **genuine** empty result, so the backend looked healthy while contributing nothing. Descriptions were also affected one level down, where Brave now emits `.generic-snippet .content` rather than `.snippet-description`. Measured on a saved live SERP: 0 results with the old selector, 10 with the fix. The pre-existing test fixture was anchored to `#results`, which is why it never caught this.
+
 ## [0.5.7] - 2026-08-30
 
 ### Added

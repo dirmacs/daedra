@@ -296,6 +296,20 @@ impl Default for SearchClient {
 /// }
 /// ```
 pub async fn perform_search(args: &SearchArgs) -> DaedraResult<SearchResponse> {
+    // An empty query is caller input, not a provider failure. Dispatching it
+    // to the backends sends degenerate requests, and the resulting unparseable
+    // pages surface as `Err` — so a caller that legitimately passes an empty
+    // string gets a transport error instead of an empty result set. Answer it
+    // directly.
+    if args.query.trim().is_empty() {
+        let options = args.options.clone().unwrap_or_default();
+        return Ok(SearchResponse::new(
+            args.query.clone(),
+            Vec::new(),
+            &options,
+        ));
+    }
+
     let client = SearchClient::new()?;
     client.search(args).await
 }
@@ -587,5 +601,33 @@ mod tests {
         let client = SearchClient::new().unwrap();
         let results = client.parse_search_results(&html, 2).unwrap();
         assert_eq!(results.len(), 2);
+    }
+    /// An empty query is caller input, so it must answer with an empty result
+    /// set rather than a transport error. Dispatching it to the backends sends
+    /// degenerate requests whose unparseable pages surface as `Err`, which
+    /// made a legitimate empty input indistinguishable from a provider outage.
+    #[tokio::test]
+    async fn empty_query_returns_empty_response_not_error() {
+        let args = SearchArgs {
+            query: String::new(),
+            options: None,
+        };
+        let resp = perform_search(&args)
+            .await
+            .expect("empty query must not be reported as a provider failure");
+        assert!(resp.data.is_empty(), "empty query yields no results");
+        assert_eq!(resp.response_type, "search_results");
+    }
+
+    #[tokio::test]
+    async fn whitespace_query_returns_empty_response_not_error() {
+        let args = SearchArgs {
+            query: "   \t ".to_string(),
+            options: None,
+        };
+        let resp = perform_search(&args)
+            .await
+            .expect("whitespace-only query must not be reported as a failure");
+        assert!(resp.data.is_empty());
     }
 }
