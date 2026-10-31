@@ -581,6 +581,13 @@ cuit_note}",
         let opts = args.options.clone().unwrap_or_default();
         let target_count = opts.num_results;
 
+        // Parse Google-style directives (`site:`, `intitle:`, `filetype:`,
+        // `after:`) out of the raw query ONCE. Measured 2026-10-31: every
+        // backend was handed the raw string, none understood it, and nothing
+        // reported that the filter had not applied — `site:github.com`
+        // returned tokio.rs and `-site:github.com` returned github.com.
+        let structured = super::query::parse(&args.query);
+
         self.rate_limiter.until_ready().await;
 
         if args.query.trim().is_empty() {
@@ -633,7 +640,12 @@ cuit_note}",
             ));
         }
 
-        let results = self.execute_concurrent_queries(&queryable, args).await;
+        // Backends receive the free text plus the operators they might honor;
+        // enforcement happens below on the merged set.
+        let mut backend_args = args.clone();
+        backend_args.query = super::query::format_for_engine(&structured);
+
+        let results = self.execute_concurrent_queries(&queryable, &backend_args).await;
         let (by_source, any_success, tried, failures) = Self::categorize_results(results);
 
         if !any_success {
@@ -700,7 +712,19 @@ cuit_note}",
             sources.len()
         );
 
-        Ok(SearchResponse::new(args.query.clone(), merged, &opts))
+        // Enforce the directives leniently: a dimension that would eliminate
+        // every result is relaxed AND recorded, so the caller can tell an
+        // applied filter from an unsatisfiable one.
+        let filtered = super::query::apply_constraints(&structured, merged);
+        if !filtered.dropped.is_empty() {
+            info!(
+                dropped = ?filtered.dropped,
+                "Query constraints could not be satisfied and were relaxed"
+            );
+        }
+
+        Ok(SearchResponse::new(args.query.clone(), filtered.sources, &opts)
+            .with_dropped_constraints(filtered.dropped))
     }
     /// List available backend names.
     pub fn available_backends(&self) -> Vec<&str> {
