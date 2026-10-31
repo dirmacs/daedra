@@ -698,3 +698,77 @@ async fn test_handle_transient_error() {
     assert!(!result.unwrap().data.is_empty());
     assert!(health.is_available());
 }
+
+    // ── two-phase aggregate deadline ────────────────────────────────────────
+
+    struct SlowBackend {
+        name: &'static str,
+        delay: Duration,
+        results: usize,
+    }
+
+    #[async_trait]
+    impl SearchBackend for SlowBackend {
+        async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+            tokio::time::sleep(self.delay).await;
+            let opts = args.options.clone().unwrap_or_default();
+            let data: Vec<crate::types::SearchResult> = (0..self.results)
+                .map(|i| test_search_result(&format!("https://slow/{i}"), "slow"))
+                .collect();
+            Ok(SearchResponse::new(args.query.clone(), data, &opts))
+        }
+
+        fn name(&self) -> &str {
+            self.name
+        }
+    }
+
+    fn args_for(q: &str) -> SearchArgs {
+        SearchArgs { query: q.to_string(), options: None }
+    }
+
+    /// A backend that answers must not be held hostage by one that does not.
+    /// Asserts ELAPSED TIME, not mere completion: `timeout(join_all(..))`
+    /// would satisfy a completion assertion while still waiting for the
+    /// slowest future.
+    #[tokio::test]
+    async fn slow_backend_does_not_block_fast_answer_past_soft_deadline() {
+        let fast = SlowBackend { name: "fast", delay: Duration::from_millis(20), results: 1 };
+        let slow = SlowBackend { name: "slow", delay: Duration::from_secs(60), results: 1 };
+        let provider = SearchProvider::new(vec![Box::new(fast), Box::new(slow)])
+            .with_deadlines(Duration::from_millis(300), Duration::from_secs(5));
+
+        let started = std::time::Instant::now();
+        let refs = provider.backend_refs();
+        let out = provider.execute_concurrent_queries(&refs, &args_for("x")).await;
+        let elapsed = started.elapsed();
+
+        assert!(!out.is_empty(), "the answered backend must be returned");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "must return near the soft deadline, not wait for the 60s backend (took {elapsed:?})"
+        );
+    }
+
+    /// With nothing answering, the call must return at the hard deadline, not
+    /// hang. The hard deadline is set BELOW BACKEND_DEADLINE so this phase is
+    /// reachable; in production the per-backend cap resolves first and the
+    /// hard timer is a backstop.
+    #[tokio::test]
+    async fn all_slow_backends_return_at_hard_deadline() {
+        let a = SlowBackend { name: "slow-a", delay: Duration::from_secs(120), results: 1 };
+        let b = SlowBackend { name: "slow-b", delay: Duration::from_secs(120), results: 1 };
+        let provider = SearchProvider::new(vec![Box::new(a), Box::new(b)])
+            .with_deadlines(Duration::from_millis(200), Duration::from_millis(700));
+
+        let started = std::time::Instant::now();
+        let refs = provider.backend_refs();
+        let out = provider.execute_concurrent_queries(&refs, &args_for("x")).await;
+        let elapsed = started.elapsed();
+
+        assert!(out.is_empty(), "nothing had answered yet");
+        assert!(
+            elapsed >= Duration::from_millis(650) && elapsed < Duration::from_secs(3),
+            "must return AT the hard deadline, not earlier and not hang (took {elapsed:?})"
+        );
+    }
