@@ -1,8 +1,9 @@
 //! Subcommand dispatch.
 
 use clap::CommandFactory;
-use colored::Colorize;
+#[cfg(feature = "crawlberg")]
 use daedra::tools::crawl_site_with_crawlberg;
+use colored::Colorize;
 use daedra::{
     DaedraResult, SERVER_NAME, VERSION,
     tools::{crawl_site, fetch},
