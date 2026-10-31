@@ -9,10 +9,10 @@
 //! none understood it, and nothing told the caller the filter had not
 //! applied.
 //!
-//! This module turns a raw query into a [`StructuredQuery`] so that:
+//! This module turns a raw query into a `StructuredQuery` so that:
 //!
-//! 1. each backend can be sent only the syntax it understands ([`format_for_engine`]),
-//! 2. results can be post-filtered ([`apply_constraints`]), and
+//! 1. each backend can be sent only the syntax it understands (`format_for_engine`),
+//! 2. results can be post-filtered (`apply_constraints`), and
 //! 3. a constraint that would eliminate every result is DROPPED AND
 //!    REPORTED rather than silently enforced or silently ignored — the
 //!    caller learns that its filter did not apply, which is strictly more
@@ -46,7 +46,7 @@ pub struct StructuredQuery {
     /// Original query string, verbatim.
     pub raw: String,
     /// Free-text remainder with all recognized directives removed. Empty when
-    /// the query was directives only — use [`format_for_engine`] for a
+    /// the query was directives only — use `format_for_engine` for a
     /// never-empty engine query.
     pub text: String,
     /// Ordered free-text terms.
@@ -73,7 +73,7 @@ pub struct StructuredQuery {
     pub before: Option<String>,
 }
 
-/// Result of [`apply_constraints`].
+/// Result of `apply_constraints`.
 #[derive(Debug, Clone)]
 pub struct ConstraintFilter {
     /// Sources surviving the lenient filter. Never empty when the input was
@@ -267,7 +267,7 @@ fn push_term(q: &mut StructuredQuery, token: &str) {
 /// Engines vary wildly in which operators they honor, so this always returns
 /// something non-empty and always includes the free text. Constraints are
 /// appended because several backends do parse them; backends that do not
-/// simply ignore them, and [`apply_constraints`] still enforces the result.
+/// simply ignore them, and `apply_constraints` still enforces the result.
 pub fn format_for_engine(q: &StructuredQuery) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !q.text.is_empty() {
@@ -298,7 +298,7 @@ pub fn format_for_engine(q: &StructuredQuery) -> String {
 /// Apply the constraints that the query carries to a result set, leniently.
 ///
 /// A constraint dimension that would eliminate EVERY result is dropped and
-/// recorded in [`ConstraintFilter::relaxed`] rather than enforced. Dimensions
+/// recorded in `ConstraintFilter::relaxed` rather than enforced. Dimensions
 /// are applied one at a time so that the caller learns exactly which filter
 /// could not be satisfied.
 pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> ConstraintFilter {
