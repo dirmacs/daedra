@@ -34,6 +34,15 @@ impl BackendHealth {
         last.elapsed() >= self.cooldown
     }
 
+    /// Consecutive failure count (test seam).
+    ///
+    /// Asserting `is_available()` conflates "charged a failure" with "crossed
+    /// the threshold", so a single charge is invisible. Tests want the charge.
+    #[cfg(test)]
+    pub fn consecutive_failures(&self) -> u32 {
+        self.consecutive_failures.load(Ordering::Relaxed)
+    }
+
     /// Record a successful request — resets consecutive failure count and closes the circuit.
     pub fn record_success(&self) {
         self.consecutive_failures.store(0, Ordering::Relaxed);

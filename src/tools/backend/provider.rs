@@ -79,6 +79,9 @@ pub struct SearchProvider {
     /// backend first and the two-phase collector always exits early.
     soft_deadline: Duration,
     hard_deadline: Duration,
+    /// Per-backend deadline. Injectable so tests can drive the per-backend
+    /// timeout path without waiting the production 5 s.
+    backend_deadline: Duration,
 }
 
 impl SearchProvider {
@@ -119,6 +122,7 @@ impl SearchProvider {
             circuit_breakers,
             soft_deadline: SOFT_DEADLINE,
             hard_deadline: HARD_DEADLINE,
+            backend_deadline: BACKEND_DEADLINE,
         }
     }
 
@@ -387,6 +391,21 @@ impl SearchProvider {
         self
     }
 
+    /// Override the per-backend deadline (test seam).
+    pub(super) fn with_backend_deadline(mut self, d: Duration) -> Self {
+        self.backend_deadline = d;
+        self
+    }
+
+    /// Circuit-breaker state for one backend by name (test seam).
+    ///
+    /// Returns the SAME Arc the fan-out charges, so a test observes exactly
+    /// what the deadline path recorded rather than a copy.
+    #[cfg(test)]
+    pub(super) fn breaker_for(&self, name: &str) -> Option<Arc<BackendHealth>> {
+        self.circuit_breakers.get(name).cloned()
+    }
+
     /// Trait-object view of the registered backends (test seam).
     pub(super) fn backend_refs(&self) -> Vec<&dyn SearchBackend> {
         self.backends.iter().map(|b| b.as_ref()).collect()
@@ -413,9 +432,10 @@ impl SearchProvider {
                 let name = b.name().to_string();
                 let health = self.circuit_breakers.get(b.name()).cloned();
                 let limiters = Arc::clone(&limiters);
+                let backend_deadline = self.backend_deadline;
                 async move {
                     match tokio::time::timeout(
-                        BACKEND_DEADLINE,
+                        backend_deadline,
                         Self::query_backend(*b, &a, health, &limiters, scraper_default),
                     )
                     .await
@@ -427,13 +447,13 @@ impl SearchProvider {
                             }
                             warn!(
                                 backend = %name,
-                                deadline_s = BACKEND_DEADLINE.as_secs(),
+                                deadline_s = backend_deadline.as_secs(),
                                 "Backend exceeded per-backend deadline, abandoned"
                             );
                             let msg = format!(
                                 "Backend {} exceeded the {}s deadline",
                                 name,
-                                BACKEND_DEADLINE.as_secs()
+                                backend_deadline.as_secs()
                             );
                             (name, Err(DaedraError::SearchError(msg)))
                         },
@@ -488,9 +508,46 @@ impl SearchProvider {
                 },
 
                 () = &mut hard => {
+                    // Charge the stragglers. Without this, a backend that is
+                    // slow enough to be abandoned by the AGGREGATE deadline
+                    // escapes the circuit breaker entirely, because only the
+                    // per-backend timeout path charges — and the aggregate
+                    // deadline can preempt it. Measured by
+                    // `backend_exceeding_deadline_is_charged_a_circuit_failure`:
+                    // with hard < per-backend, the abandoned future returned
+                    // zero entries and the breaker stayed closed.
+                    // Charge the stragglers: an endpoint that is always too
+                    // slow must eventually stop being asked, and a backend
+                    // that vanishes from the result set reads as "it answered
+                    // nothing" — a different, misleading claim from "we
+                    // stopped waiting". Only the per-backend timeout path
+                    // charged before, so the aggregate deadline could preempt
+                    // it and escape the breaker entirely.
+                    // Owned copies: `collected` is borrowed immutably here and
+                    // mutated below.
+                    let seen: std::collections::HashSet<String> =
+                        collected.iter().map(|(n, _)| n.clone()).collect();
+                    let mut abandoned = 0usize;
+                    for b in backends {
+                        let n = b.name();
+                        if seen.contains(n) {
+                            continue;
+                        }
+                        abandoned += 1;
+                        if let Some(h) = self.circuit_breakers.get(n) {
+                            h.record_failure();
+                        }
+                        collected.push((
+                            n.to_string(),
+                            Err(DaedraError::SearchError(format!(
+                                "Backend {n} was abandoned at the {}ms aggregate deadline",
+                                self.hard_deadline.as_millis()
+                            ))),
+                        ));
+                    }
                     warn!(
                         collected = collected.len(),
-                        abandoned = pending.len(),
+                        abandoned,
                         hard_ms = self.hard_deadline.as_millis(),
                         "Hard deadline reached; returning partial results"
                     );
