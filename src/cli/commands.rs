@@ -2,13 +2,11 @@
 
 use clap::CommandFactory;
 use colored::Colorize;
+use daedra::tools::crawl_site_with_crawlberg;
 use daedra::{
     DaedraResult, SERVER_NAME, VERSION,
     tools::{crawl_site, fetch},
-    types::{
-        CrawlArgs, DaedraError, SearchArgs,
-        SearchOptions, VisitPageArgs,
-    },
+    types::{CrawlArgs, DaedraError, SearchArgs, SearchOptions, VisitPageArgs},
 };
 use std::time::Duration;
 
@@ -18,8 +16,6 @@ use crate::cli::config::*;
 use crate::cli::logging::*;
 use crate::cli::pretty::*;
 use crate::cli::serve::*;
-
-
 
 impl Commands {
     pub async fn run(
@@ -145,7 +141,6 @@ impl Commands {
     }
 }
 
-
 pub(super) async fn run_search(
     query: String,
     opts: SearchOptions,
@@ -181,7 +176,6 @@ pub(super) async fn run_search(
     print_search(&query, response, format, no_color)
 }
 
-
 /// Print a search response in the requested format (shared by cache hits
 /// and fresh runs).
 pub(super) fn print_search(
@@ -208,7 +202,6 @@ pub(super) fn print_search(
 
     Ok(())
 }
-
 
 pub(super) async fn run_fetch(
     url: String,
@@ -247,7 +240,6 @@ pub(super) async fn run_fetch(
     print_page(&content, format, no_color)
 }
 
-
 /// Print fetched page content in the requested format.
 pub(super) fn print_page(
     content: &daedra::types::PageContent,
@@ -262,7 +254,6 @@ pub(super) fn print_page(
 
     Ok(())
 }
-
 
 pub(super) async fn run_crawl(
     args: CrawlArgs,
@@ -308,7 +299,6 @@ pub(super) async fn run_crawl(
     Ok(())
 }
 
-
 /// Char-boundary-safe teaser: first `n` characters of `s`, never splitting
 /// a multi-byte character.
 pub(super) fn teaser(s: &str, n: usize) -> &str {
@@ -317,7 +307,6 @@ pub(super) fn teaser(s: &str, n: usize) -> &str {
         None => s,
     }
 }
-
 
 /// The four MCP tools, with the same names and descriptions the server
 /// advertises over `tools/list`. `info` must never drift from this.
@@ -333,7 +322,6 @@ pub(super) const MCP_TOOLS: [(&str, &str); 4] = [
     ("visit_page", "Fetch and extract webpage content"),
     ("crawl_site", "Crawl a site via sitemap or link discovery"),
 ];
-
 
 pub(super) fn run_info(no_color: bool, format: OutputFormat) {
     if format == OutputFormat::Json || format == OutputFormat::JsonCompact {

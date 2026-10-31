@@ -30,7 +30,11 @@ impl BackendRateLimiters {
         RateLimiter::dashmap(Quota::per_second(NonZeroU32::new(2).unwrap()))
     }
 
-    pub(super) async fn until_ready(&self, name: &str, scraper_default: &DefaultKeyedRateLimiter<String>) {
+    pub(super) async fn until_ready(
+        &self,
+        name: &str,
+        scraper_default: &DefaultKeyedRateLimiter<String>,
+    ) {
         let key = name.to_string();
         match name {
             // Scraper backends use the moderate default keyed limiter on SearchProvider.

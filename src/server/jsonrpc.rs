@@ -1,10 +1,11 @@
 //! JSON-RPC wire types for the MCP envelope.
 
-use serde::{Deserialize, Serialize};
 use crate::types::PageContent;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// A JSON-RPC 2.0 request or notification.
 pub struct JsonRpcRequest {
     /// JSON-RPC version (always "2.0")
     pub jsonrpc: String,

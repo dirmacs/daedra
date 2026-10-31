@@ -1,6 +1,5 @@
 //! `daedra serve`: run the MCP server over stdio or SSE.
 
-use clap::Parser;
 use daedra::{
     DaedraResult,
     cache::CacheConfig,
@@ -10,8 +9,6 @@ use daedra::{
 use std::net::ToSocketAddrs;
 
 use crate::cli::args::TransportOption;
-
-
 
 pub(super) fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
     if host.eq_ignore_ascii_case("localhost") {
@@ -37,7 +34,6 @@ pub(super) fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
         ))),
     }
 }
-
 
 pub(super) async fn run_serve(
     transport: TransportOption,

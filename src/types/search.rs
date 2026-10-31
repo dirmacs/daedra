@@ -2,11 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
-
 use super::analysis::{detect_language, detect_topics};
 use super::content::{QueryAnalysis, SearchContext, SearchMetadata, SearchResult};
 use super::error::DaedraError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+/// Safe-search filtering level applied to a query.
 pub enum SafeSearchLevel {
     /// No filtering
     Off,

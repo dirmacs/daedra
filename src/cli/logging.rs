@@ -4,8 +4,6 @@ use colored::Colorize;
 use daedra::VERSION;
 use tracing_subscriber::{EnvFilter, fmt};
 
-
-
 /// Set up logging with configurable output destination
 ///
 /// # Arguments
@@ -38,7 +36,6 @@ pub fn setup_logging(verbose: bool, use_stderr: bool, quiet: bool) {
     }
 }
 
-
 pub(super) fn print_banner() {
     println!(
         r#"
@@ -58,26 +55,21 @@ pub(super) fn print_banner() {
     );
 }
 
-
 pub(super) fn print_success(message: &str) {
     println!("{} {}", "✓".green().bold(), message);
 }
-
 
 pub fn print_error(message: &str) {
     eprintln!("{} {}", "✗".red().bold(), message);
 }
 
-
 pub(super) fn print_info(label: &str, value: &str) {
     println!("  {} {}", format!("{}:", label).bright_blue(), value);
 }
 
-
 pub(super) fn print_section(title: &str) {
     println!("{}", format_section(title));
 }
-
 
 pub(super) fn format_section(title: &str) -> String {
     format!(
@@ -86,7 +78,6 @@ pub(super) fn format_section(title: &str) -> String {
         "─".repeat(40).bright_black()
     )
 }
-
 
 pub(super) fn format_info(label: &str, value: &str) -> String {
     format!("  {} {}\n", format!("{}:", label).bright_blue(), value)

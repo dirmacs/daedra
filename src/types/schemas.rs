@@ -1,6 +1,6 @@
 //! JSON Schemas advertised to MCP clients.
 
-
+/// JSON Schema for search arguments (used for MCP tool definition)
 pub fn search_args_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",

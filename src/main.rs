@@ -8,7 +8,6 @@ use cli::logging::{print_error, setup_logging};
 
 mod cli;
 
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -45,7 +44,6 @@ async fn main() {
         std::process::exit(1);
     }
 }
-
 
 #[cfg(test)]
 mod tests {

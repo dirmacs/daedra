@@ -2,8 +2,8 @@
 
 use crate::types::{DaedraError, DaedraResult};
 use crate::{SERVER_NAME, VERSION};
-use tokio::io::{AsyncBufReadExt, BufReader};
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{info, instrument};
 
 use super::handler::DaedraHandler;
@@ -11,6 +11,7 @@ use super::jsonrpc::{JsonRpcRequest, JsonRpcResponse};
 use super::stdio::{process_stdio_line, write_stdio_response};
 use super::transport::{ServerConfig, TransportType};
 
+/// SSE/HTTP transport for the MCP server.
 pub struct DaedraServer {
     handler: DaedraHandler,
     #[allow(dead_code)]

@@ -4,16 +4,11 @@ use colored::Colorize;
 use daedra::{
     DaedraResult,
     tools::{fetch, search},
-    types::{
-        SearchArgs,
-        SearchOptions,
-    },
+    types::{SearchArgs, SearchOptions},
 };
 
 use crate::cli::args::{OutputFormat, TransportOption};
 use crate::cli::logging::*;
-
-
 
 pub(super) fn check_section_message(title: &str) -> String {
     match title {
@@ -26,7 +21,6 @@ Testing search functionality..."
         _ => title.to_string(),
     }
 }
-
 
 pub(super) fn check_summary_message(all_ok: bool, no_color: bool) -> String {
     if all_ok {
@@ -42,7 +36,6 @@ pub(super) fn check_summary_message(all_ok: bool, no_color: bool) -> String {
     }
 }
 
-
 pub(super) fn should_print_banner(
     verbose: bool,
     quiet: bool,
@@ -55,14 +48,12 @@ pub(super) fn should_print_banner(
         && matches!(transport, TransportOption::Sse)
 }
 
-
 pub(super) struct CheckReporter {
     no_color: bool,
     /// Every reported outcome, kept in order so `-f json` can print the
     /// same report machine-readably.
     entries: std::cell::RefCell<Vec<(String, bool, String)>>,
 }
-
 
 impl CheckReporter {
     fn new(no_color: bool) -> Self {
@@ -156,7 +147,6 @@ impl CheckReporter {
     }
 }
 
-
 pub(super) fn check_search_client(reporter: &CheckReporter) -> bool {
     match search::SearchClient::new() {
         Ok(_) => {
@@ -171,7 +161,6 @@ pub(super) fn check_search_client(reporter: &CheckReporter) -> bool {
         },
     }
 }
-
 
 /// Report which optional quota tokens are set. A missing token is not a
 /// failure — search still runs on public endpoints.
@@ -205,7 +194,6 @@ pub(super) fn check_api_keys(reporter: &CheckReporter) {
     );
 }
 
-
 pub(super) fn check_fetch_client(reporter: &CheckReporter) -> bool {
     match fetch::FetchClient::new() {
         Ok(_) => {
@@ -218,7 +206,6 @@ pub(super) fn check_fetch_client(reporter: &CheckReporter) -> bool {
         },
     }
 }
-
 
 pub(super) async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
     let test_args = SearchArgs {
@@ -262,7 +249,6 @@ pub(super) async fn check_search_connectivity(reporter: &CheckReporter) -> bool 
         },
     }
 }
-
 
 pub(super) async fn run_check(no_color: bool, format: OutputFormat) -> DaedraResult<()> {
     let reporter = CheckReporter::new(no_color);

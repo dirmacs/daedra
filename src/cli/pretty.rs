@@ -1,14 +1,10 @@
 //! Human-readable output formatting.
 
 use colored::Colorize;
-use daedra::types::{
-        CrawlResult, PageContent, SearchResult,
-    };
+use daedra::types::{CrawlResult, PageContent, SearchResult};
 
 use crate::cli::commands::teaser;
 use crate::cli::logging::{format_info, format_section, print_section};
-
-
 
 pub(super) fn format_page_header(title: &str, no_color: bool) -> String {
     if no_color {
@@ -22,8 +18,12 @@ pub(super) fn format_page_header(title: &str, no_color: bool) -> String {
     }
 }
 
-
-pub(super) fn format_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) -> String {
+pub(super) fn format_search_header_pretty(
+    query: &str,
+    count: usize,
+    region: &str,
+    no_color: bool,
+) -> String {
     if no_color {
         format!(
             "\nSearch Results for: {}\n{}\nFound {} results in region '{}'\n\n",
@@ -42,8 +42,11 @@ pub(super) fn format_search_header_pretty(query: &str, count: usize, region: &st
     }
 }
 
-
-pub(super) fn format_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) -> String {
+pub(super) fn format_search_result_pretty(
+    result: &SearchResult,
+    index: usize,
+    no_color: bool,
+) -> String {
     if no_color {
         format!(
             "{}. {}\n   URL: {}\n   {}\n   Source: {} | Type: {:?}\n\n",
@@ -69,7 +72,6 @@ pub(super) fn format_search_result_pretty(result: &SearchResult, index: usize, n
         )
     }
 }
-
 
 pub(super) fn format_page_content_pretty(content: &PageContent, no_color: bool) -> String {
     let mut out = format_page_header(&content.title, no_color);
@@ -110,7 +112,6 @@ pub(super) fn format_page_content_pretty(content: &PageContent, no_color: bool) 
     out
 }
 
-
 pub(super) fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
     print!(
         "{}",
@@ -118,16 +119,13 @@ pub(super) fn print_search_header_pretty(query: &str, count: usize, region: &str
     );
 }
 
-
 pub(super) fn print_search_result_pretty(result: &SearchResult, index: usize, no_color: bool) {
     print!("{}", format_search_result_pretty(result, index, no_color));
 }
 
-
 pub(super) fn print_page_content_pretty(content: &PageContent, no_color: bool) {
     print!("{}", format_page_content_pretty(content, no_color));
 }
-
 
 pub(super) fn print_crawl_result_pretty(result: &CrawlResult, no_color: bool) {
     if no_color {

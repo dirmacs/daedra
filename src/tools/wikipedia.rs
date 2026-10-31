@@ -101,10 +101,7 @@ impl SearchBackend for WikipediaBackend {
                     .unwrap_or_default();
                 let description = strip_html(snippet);
 
-                let url = format!(
-                    "https://en.wikipedia.org/wiki/{}",
-                    title.replace(' ', "_")
-                );
+                let url = format!("https://en.wikipedia.org/wiki/{}", title.replace(' ', "_"));
 
                 results.push(SearchResult {
                     title: title.to_string(),

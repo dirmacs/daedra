@@ -1,9 +1,10 @@
 //! Circuit-breaker state for a single backend.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
+/// Circuit-breaker state for a single backend.
 pub struct BackendHealth {
     consecutive_failures: AtomicU32,
     is_open: AtomicBool,

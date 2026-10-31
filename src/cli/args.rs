@@ -1,12 +1,7 @@
 //! Command-line argument definitions.
 
 use clap::{Parser, Subcommand, ValueEnum};
-use daedra::{
-    VERSION,
-    types::SafeSearchLevel,
-};
-
-
+use daedra::{VERSION, types::SafeSearchLevel};
 
 /// Daedra - High-performance Web Search and Research MCP Server
 #[derive(Parser, Debug)]
@@ -45,7 +40,6 @@ pub struct Cli {
     pub(crate) command: Commands,
 }
 
-
 /// Output format options
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum OutputFormat {
@@ -57,7 +51,6 @@ pub enum OutputFormat {
     /// Compact JSON output
     JsonCompact,
 }
-
 
 /// Global options: accepted before or after any subcommand.
 #[derive(clap::Args, Clone, Debug)]
@@ -75,7 +68,6 @@ pub struct GlobalArgs {
     #[arg(long, global = true)]
     pub(crate) config: Option<String>,
 }
-
 
 /// Available commands
 #[derive(Subcommand, Debug)]
@@ -188,7 +180,6 @@ pub enum Commands {
     Check,
 }
 
-
 /// Crawl engine choices
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
 pub enum CrawlEngineOption {
@@ -199,7 +190,6 @@ pub enum CrawlEngineOption {
     Crawlberg,
 }
 
-
 /// Transport options for the serve command
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
 pub enum TransportOption {
@@ -209,7 +199,6 @@ pub enum TransportOption {
     /// Server-Sent Events over HTTP
     Sse,
 }
-
 
 /// Safe search options
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
@@ -223,7 +212,6 @@ pub enum SafeSearchOption {
     Strict,
 }
 
-
 impl From<SafeSearchOption> for SafeSearchLevel {
     fn from(opt: SafeSearchOption) -> Self {
         match opt {
@@ -233,7 +221,6 @@ impl From<SafeSearchOption> for SafeSearchLevel {
         }
     }
 }
-
 
 #[cfg(test)]
 pub fn safe_search_from_u8(v: u8) -> Option<SafeSearchLevel> {

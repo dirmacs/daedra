@@ -3,8 +3,6 @@
 use daedra::cache::CacheConfig;
 use std::time::Duration;
 
-
-
 /// Defaults loaded from a TOML file (--config or
 /// ~/.config/daedra/daedra.toml). Flags always win over file values.
 #[derive(Debug, Default, serde::Deserialize)]
@@ -14,7 +12,6 @@ pub(super) struct FileConfig {
     pub(crate) timeout_secs: Option<u64>,
     pub(crate) cache_ttl_secs: Option<u64>,
 }
-
 
 pub(super) fn load_file_config(path: Option<&str>) -> FileConfig {
     let resolved = path.map(std::path::PathBuf::from).or_else(|| {
@@ -33,7 +30,6 @@ pub(super) fn load_file_config(path: Option<&str>) -> FileConfig {
         Err(_) => FileConfig::default(),
     }
 }
-
 
 pub(super) fn build_cache_config(no_cache: bool, cache_ttl: u64) -> CacheConfig {
     if no_cache {

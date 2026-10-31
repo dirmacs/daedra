@@ -1,27 +1,27 @@
 //! Request handler: dispatches a JSON-RPC tool call to the right backend.
 
-use tracing::error;
 use crate::cache::SearchCache;
 use crate::tools::{self, crawl_site, fetch};
 use crate::types::{
-    CrawlArgs, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult,
-    VisitPageArgs, crawl_args_schema, search_args_schema, visit_page_args_schema,
+    CrawlArgs, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult, VisitPageArgs,
+    crawl_args_schema, search_args_schema, visit_page_args_schema,
 };
 use crate::{SERVER_NAME, VERSION};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
+use tracing::error;
 use tracing::{debug, info, instrument};
 
 use super::jsonrpc::{
-    JsonRpcRequest, JsonRpcResponse, format_page_result, tool_error_response,
-    tool_success_response,
+    JsonRpcRequest, JsonRpcResponse, format_page_result, tool_error_response, tool_success_response,
 };
 use super::stdio::parse_tool_call_params;
 use super::tools::McpTool;
 use super::transport::{MCP_PROTOCOL_VERSION, ServerConfig};
 
 #[derive(Clone)]
+/// Dispatches an incoming JSON-RPC tool call to the right backend.
 pub struct DaedraHandler {
     /// Search cache
     pub(super) cache: SearchCache,
@@ -266,7 +266,11 @@ impl DaedraHandler {
         }
     }
 
-    pub(super) async fn handle_visit_page(&self, id: Option<Value>, arguments: Value) -> JsonRpcResponse {
+    pub(super) async fn handle_visit_page(
+        &self,
+        id: Option<Value>,
+        arguments: Value,
+    ) -> JsonRpcResponse {
         let args: VisitPageArgs = match serde_json::from_value(arguments) {
             Ok(a) => a,
             Err(e) => {

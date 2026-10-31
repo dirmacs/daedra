@@ -147,4 +147,3 @@ fn tokens_in_order(hay: &str, tokens: &[String]) -> bool {
     }
     true
 }
-

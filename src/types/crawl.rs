@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Request parameters for a site crawl: seed URL, page and depth limits,
+/// concurrency, and which crawler engine to use.
 pub struct CrawlArgs {
     /// The root URL of the site to crawl
     pub root_url: String,

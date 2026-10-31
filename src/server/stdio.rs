@@ -1,15 +1,14 @@
 //! Line-oriented stdio transport for MCP.
 
-use serde_json::json;
-use tracing::debug;
 use serde_json::Value;
+use serde_json::json;
 use tokio::io::AsyncWriteExt;
+use tracing::debug;
 
 use super::handler::DaedraHandler;
-use super::jsonrpc::{
-    JsonRpcRequest, JsonRpcResponse, is_notification,
-};
+use super::jsonrpc::{JsonRpcRequest, JsonRpcResponse, is_notification};
 
+#[allow(clippy::result_large_err)]
 pub(super) fn parse_tool_call_params(
     params: Option<Value>,
     id: Option<Value>,
@@ -33,11 +32,11 @@ pub(super) fn parse_tool_call_params(
     Ok((tool_name, arguments))
 }
 
-
-
-
 /// Parse and handle one STDIO line; returns a response only for non-notification requests.
-pub(super) async fn process_stdio_line(line: &str, handler: &DaedraHandler) -> Option<JsonRpcResponse> {
+pub(super) async fn process_stdio_line(
+    line: &str,
+    handler: &DaedraHandler,
+) -> Option<JsonRpcResponse> {
     if line.trim().is_empty() {
         return None;
     }

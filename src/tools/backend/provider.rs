@@ -36,6 +36,7 @@ use super::rank::{canonical_url_key, query_tokens, relevance_score};
 /// persistently slow endpoint eventually stops being asked.
 const BACKEND_DEADLINE: Duration = Duration::from_secs(5);
 
+/// Multi-backend search provider with automatic fallback.
 pub struct SearchProvider {
     backends: Vec<Box<dyn SearchBackend>>,
     /// Limits how fast aggregate searches are issued (avoids tripping scraper rate limits).
@@ -133,7 +134,9 @@ impl SearchProvider {
 
         // StackExchange — always works from any IP, technical Q&A
         info!("StackExchange backend enabled (always works, technical)");
-        backends.push(Box::new(crate::tools::stackexchange::StackExchangeBackend::new()));
+        backends.push(Box::new(
+            crate::tools::stackexchange::StackExchangeBackend::new(),
+        ));
 
         // GitHub — always works, code/repo search
         info!("GitHub backend enabled (always works, code/repos)");
@@ -234,7 +237,10 @@ impl SearchProvider {
         (name, result)
     }
 
-    pub(super) async fn retry_once(b: &dyn SearchBackend, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+    pub(super) async fn retry_once(
+        b: &dyn SearchBackend,
+        args: &SearchArgs,
+    ) -> DaedraResult<SearchResponse> {
         // One retry after a fixed 400 ms pause. The caller classifies errors;
         // only transient errors reach this function.
         tokio::time::sleep(Duration::from_millis(400)).await;

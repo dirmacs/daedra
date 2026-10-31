@@ -4,9 +4,7 @@
 use crate::types::{DaedraError, DaedraResult};
 
 use super::client::FetchedContent;
-use super::mime::{
-    bytes_to_utf8_string, is_binary_mime, normalize_content_type,
-};
+use super::mime::{bytes_to_utf8_string, is_binary_mime, normalize_content_type};
 
 pub(super) fn extract_pdf_content(bytes: &[u8]) -> DaedraResult<FetchedContent> {
     // pdf-inspector (MIT, zero deps) replaces pdf-extract: it emits
@@ -104,7 +102,10 @@ pub(super) fn extract_document_content(bytes: &[u8], ct: &str) -> DaedraResult<F
     })
 }
 
-pub(super) fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
+pub(super) fn classify_by_fallback(
+    content_type: &str,
+    bytes: &[u8],
+) -> DaedraResult<FetchedContent> {
     let ct = normalize_content_type(content_type);
     if ct.contains("text/html") {
         return Ok(FetchedContent::Html(bytes_to_utf8_string(bytes)));
@@ -135,7 +136,10 @@ pub(super) fn classify_by_fallback(content_type: &str, bytes: &[u8]) -> DaedraRe
     })
 }
 
-pub(super) fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> DaedraResult<FetchedContent> {
+pub(super) fn classify_fetched_content(
+    content_type: &str,
+    bytes: &[u8],
+) -> DaedraResult<FetchedContent> {
     if let Some(kind) = infer::get(bytes) {
         if let Some(content) = classify_by_inference(&kind, bytes) {
             return Ok(content);
@@ -147,4 +151,3 @@ pub(super) fn classify_fetched_content(content_type: &str, bytes: &[u8]) -> Daed
 
     classify_by_fallback(content_type, bytes)
 }
-

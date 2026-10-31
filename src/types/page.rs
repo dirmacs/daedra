@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Content extracted from one fetched page: title, URL, body text or
+/// Markdown, links, and metadata.
 pub struct PageContent {
     /// URL of the page
     pub url: String,

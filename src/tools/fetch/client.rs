@@ -11,15 +11,15 @@ use tracing::{error, info, instrument, warn};
 use url::Url;
 
 use super::extract::{
-    classify_fetched_content, extract_pdf_content,
-    is_container_mime, is_office_content_type, is_textual_content_type,
+    classify_fetched_content, extract_pdf_content, is_container_mime, is_office_content_type,
+    is_textual_content_type,
 };
 use super::markdown::{clean_markdown, clean_title, html_to_markdown, strip_img_tags};
 use super::mime::{
     check_body_size, is_known_binary_content_type, normalize_content_type, validate_url,
 };
 
-enum RetryErr {
+pub(super) enum RetryErr {
     Transient(DaedraError),
     Permanent(DaedraError),
 }
@@ -579,12 +579,14 @@ pub(super) fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }
 
-
 pub(super) fn is_retryable_status(status: u16) -> bool {
     status == 429
 }
 
-pub(super) fn classify_response_status(status: reqwest::StatusCode, url: &str) -> Result<(), RetryErr> {
+pub(super) fn classify_response_status(
+    status: reqwest::StatusCode,
+    url: &str,
+) -> Result<(), RetryErr> {
     if status.is_success() {
         return Ok(());
     }
@@ -721,6 +723,7 @@ pub(super) fn text_from_selector(document: &Html, selector: &Selector) -> Option
         .map(|t| clean_title(&t))
 }
 
+/// Fetch a page and extract its content as Markdown.
 pub async fn fetch_page(args: &VisitPageArgs) -> DaedraResult<PageContent> {
     let client = FetchClient::new()?;
     client.fetch(args).await
@@ -735,7 +738,6 @@ pub fn is_valid_url(url: &str) -> bool {
 }
 
 /// Convert HTML to Markdown
-
 pub fn html_to_page_content(
     html: &str,
     url: &str,
