@@ -22,19 +22,32 @@ const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 const BRAVE_URL: &str = "https://search.brave.com/search";
 
 lazy_static! {
-    /// Web result cards. Brave's DOM marks them `data-type="web"` inside
-    /// `#results`; the plain `.snippet` fallback covers layout drift.
-    static ref RESULT_SELECTOR: Selector =
-        Selector::parse("#results .snippet[data-type='web'], #results .snippet").unwrap();
-    static ref TITLE_SELECTORS: [Selector; 3] = [
+    /// Web result cards. Brave's DOM marks them `data-type="web"` inside the
+    /// `#search-page` column; the plain `.snippet` fallback covers layout
+    /// drift, and a bare page-wide `.snippet` keeps older layouts working.
+    ///
+    /// The container id is load-bearing: Brave moved from `#results` to
+    /// `#search-page`, and a stale container anchor makes every query parse
+    /// as zero results while still looking like a genuine empty page.
+    static ref RESULT_SELECTOR: Selector = Selector::parse(
+        "#search-page .snippet[data-type='web'], \
+         #search-page .snippet, \
+         #results .snippet, \
+         .snippet[data-type='web']"
+    )
+    .unwrap();
+    static ref TITLE_SELECTORS: [Selector; 4] = [
         Selector::parse(".title").unwrap(),
+        Selector::parse(".search-snippet-title").unwrap(),
         Selector::parse("a .url").unwrap(),
         Selector::parse("a[href] .snippet-title").unwrap(),
     ];
     static ref LINK_SELECTOR: Selector = Selector::parse("a[href]").unwrap();
-    static ref SNIPPET_SELECTORS: [Selector; 2] = [
+    static ref SNIPPET_SELECTORS: [Selector; 4] = [
+        Selector::parse(".generic-snippet .content").unwrap(),
         Selector::parse(".snippet-description").unwrap(),
         Selector::parse(".snippet-content").unwrap(),
+        Selector::parse(".snippet-description-text").unwrap(),
     ];
 }
 
@@ -240,10 +253,53 @@ mod tests {
         assert!(
             backend
                 .parse_results(
-                    "<html><body><div id='results'><p>no results</p></div></body></html>",
+                    "<html><body><div id='search-page'><p>no results</p></div></body></html>",
                     10
                 )
                 .is_empty()
         );
+    }
+
+    /// Markup copied from a live Brave SERP: cards live under `#search-page`
+    /// and the description sits in `.generic-snippet .content`. A parser
+    /// anchored to the retired `#results` container returns nothing here.
+    const LIVE_FIXTURE: &str = r#"<html><body><main id="search-page"><div class="serp-columns">
+      <div class="snippet svelte-jmfu5f" data-pos="1" data-type="web">
+        <div class="result-body"><div class="result-content">
+          <a href="https://www.wikipedia.org/" class="l1">
+            <div class="site-name-content"><cite class="snippet-url">wikipedia.org</cite></div>
+            <div class="title search-snippet-title line-clamp-1">Wikipedia, the free encyclopedia</div>
+          </a>
+          <div class="generic-snippet"><div class="content desktop-default-regular">Wikipedia is a free online encyclopedia, created and edited by volunteers.</div></div>
+        </div></div>
+      </div>
+      <div class="snippet svelte-jmfu5f" data-pos="2" data-type="web">
+        <div class="result-body"><div class="result-content">
+          <a href="https://docs.rs/tokio" class="l1">
+            <div class="title search-snippet-title">tokio - Rust</div>
+          </a>
+          <div class="generic-snippet"><div class="content">Latest crate docs.</div></div>
+        </div></div>
+      </div>
+    </div></main></body></html>"#;
+
+    #[test]
+    fn test_parse_live_brave_layout() {
+        let backend = BraveBackend::new();
+        let results = backend.parse_results(LIVE_FIXTURE, 10);
+        assert_eq!(
+            results.len(),
+            2,
+            "cards under #search-page must be parsed; a #results-only selector yields 0"
+        );
+        assert_eq!(results[0].url, "https://www.wikipedia.org/");
+        assert_eq!(results[0].title, "Wikipedia, the free encyclopedia");
+        assert!(
+            results[0].description.contains("free online encyclopedia"),
+            "description must come from .generic-snippet .content, got {:?}",
+            results[0].description
+        );
+        assert_eq!(results[1].url, "https://docs.rs/tokio");
+        assert!(results[1].description.contains("Latest crate docs"));
     }
 }
