@@ -3,12 +3,11 @@
 use serde_json::json;
 use tracing::debug;
 use serde_json::Value;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing::{error, info};
+use tokio::io::AsyncWriteExt;
 
 use super::handler::DaedraHandler;
 use super::jsonrpc::{
-    JsonRpcRequest, JsonRpcResponse, is_notification, tool_error_response, tool_success_response,
+    JsonRpcRequest, JsonRpcResponse, is_notification,
 };
 
 pub(super) fn parse_tool_call_params(

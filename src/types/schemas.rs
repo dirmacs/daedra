@@ -1,6 +1,5 @@
 //! JSON Schemas advertised to MCP clients.
 
-use serde_json::{Value, json};
 
 pub fn search_args_schema() -> serde_json::Value {
     serde_json::json!({

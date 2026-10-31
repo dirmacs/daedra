@@ -2,9 +2,8 @@
 
 use crate::types::{DaedraError, DaedraResult};
 use crate::{SERVER_NAME, VERSION};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use std::sync::Arc;
-use tokio::sync::Semaphore;
 use tracing::{info, instrument};
 
 use super::handler::DaedraHandler;

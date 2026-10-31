@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::content::{ContentType, ResultMetadata};
 
 use super::analysis::{detect_language, detect_topics};
 use super::content::{QueryAnalysis, SearchContext, SearchMetadata, SearchResult};

@@ -1,10 +1,10 @@
 //! Request handler: dispatches a JSON-RPC tool call to the right backend.
 
 use tracing::error;
-use crate::cache::{CacheConfig, SearchCache};
+use crate::cache::SearchCache;
 use crate::tools::{self, crawl_site, fetch};
 use crate::types::{
-    CrawlArgs, DaedraError, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult,
+    CrawlArgs, DaedraResult, PageContent, SearchArgs, SearchResponse, SearchResult,
     VisitPageArgs, crawl_args_schema, search_args_schema, visit_page_args_schema,
 };
 use crate::{SERVER_NAME, VERSION};
@@ -14,7 +14,7 @@ use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, info, instrument};
 
 use super::jsonrpc::{
-    JsonRpcRequest, JsonRpcResponse, format_page_result, is_notification, tool_error_response,
+    JsonRpcRequest, JsonRpcResponse, format_page_result, tool_error_response,
     tool_success_response,
 };
 use super::stdio::parse_tool_call_params;
