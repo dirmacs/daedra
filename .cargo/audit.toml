@@ -1,0 +1,40 @@
+# cargo-audit configuration.
+#
+# Ignores here are REACHABILITY ARGUMENTS, not suppressions. Each one names the
+# unreachable code path it depends on, so that the next person can re-check the
+# argument instead of taking the ignore on trust.
+
+[advisories]
+
+# The zip 8.6.0 advisories that arrive transitively via anydoc:
+#
+#   RUSTSEC-2026-0367  insecure preservation of SUID/SGID during extraction
+#   RUSTSEC-2026-0368  extract() creates symlinks with attacker-controlled targets
+#   RUSTSEC-2026-0369  Unix permissions applied through symlinks, unconfinement
+#
+# All three are about `ZipArchive::extract()` / `ZipFile::extract()` WRITING
+# FILES TO DISK. anydoc 0.2.4 never calls it.
+#
+# Verified against the vendored source of anydoc 0.2.4, 2026-10-31:
+#
+#   * Archives are opened in memory only:
+#       src/package/archive.rs:24  ZipArchive::new(Cursor::new(bytes))
+#     The input is a &[u8]; there is no filesystem destination.
+#   * Entries are read with `by_name()` (src/package/archive.rs:45), which
+#     returns decompressed bytes in memory.
+#   * `grep -rn '\.extract(' src/` returns NO non-test matches — the vulnerable
+#     API is never called.
+#   * anydoc applies its own bounds before reading:
+#       MAX_ENTRY_COUNT (archive.rs:26) and MAX_ENTRY_BYTES (file.size()).
+#
+# So the vulnerable symlink/permission logic cannot execute on any input this
+# crate handles, including attacker-supplied documents fetched over HTTP.
+#
+# RE-CHECK THIS when anydoc moves to zip 9, or if anydoc starts extracting to
+# disk, or if this crate ever calls a zip extraction API directly. If any of
+# those happen, delete these ignores rather than renewing them.
+ignore = [
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
