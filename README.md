@@ -138,6 +138,29 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+### Optional Parallel library backend
+
+Rust applications can opt into [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+for additional general-web search coverage. Anonymous search uses Fast mode and
+requires no account or API key. Free-tier rate limits apply.
+
+Construct a provider with
+`SearchProvider::new(vec![Box::new(daedra::tools::parallel::ParallelBackend::new())])`.
+The backend returns Daedra's usual search results, including URLs and excerpts.
+Reuse the backend instance for related searches. It is separate from the built-in
+automatic chain and is not selected by the CLI's `--backend` option.
+
+Parallel's anonymous tool does not expose SafeSearch, region or recency filters.
+Set `safe_search: SafeSearchLevel::Off`, use the default worldwide region
+(`wt-wt`), and leave `time_range` unset. Other filter settings return an error.
+Existing automatic search and MCP server behavior stay unchanged.
+
+Run the [complete example](examples/parallel_search.rs) from a source checkout:
+
+```bash
+cargo run --example parallel_search -- "Rust async runtime"
+```
+
 ## MCP tools
 
 ### `web_search`
