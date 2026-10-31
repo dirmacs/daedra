@@ -1,6 +1,6 @@
 [package]
 name = "daedra"
-version = "0.5.11"
+version = "0.5.12"
 edition = "2024"
 authors = ["DIRMACS Global Services <build@dirmacs.com>"]
 description = "Self-contained web search MCP server. 14 unkeyed backends with automatic fallback. Works from any IP."
@@ -94,7 +94,10 @@ html-escape = "0.2.13"
 clap_complete = "4"
 crawlberg = { version = "1.4", optional = true }
 toml = "0.9"
-anydoc = "0.2"
+# Office/ebook -> Markdown conversion. Optional so a consumer that only
+# wants search or the fetch text path does not inherit anydoc's dependency
+# tree (which currently carries zip 8.x). Default-on via `documents`.
+anydoc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4.4"
@@ -109,9 +112,13 @@ name = "search_benchmark"
 harness = false
 
 [features]
-default = ["stdio", "sse"]
+default = ["stdio", "sse", "documents"]
 stdio = []
 sse = []
+# Office/ebook document conversion (docx, xlsx, pptx, odt, epub, rtf, csv)
+# via anydoc. Off means those content types are delivered as raw binary or
+# text instead of converted Markdown, and anydoc leaves the dependency tree.
+documents = ["dep:anydoc"]
 # Opt-in crawl engine. Default builds stay lean; the native crawler covers
 # sitemap, robots, depth, and delay on its own.
 crawlberg = ["dep:crawlberg"]

@@ -660,6 +660,7 @@ fn test_classify_inferred_mime_text_plain() {
 }
 
 #[test]
+#[cfg(feature = "documents")]
 fn test_classify_inferred_mime_text_csv() {
     let bytes = b"name,value\na,1";
     let result = classify_inferred_mime("text/csv", bytes);
@@ -680,8 +681,26 @@ fn test_classify_inferred_mime_docx_is_document_not_text() {
 }
 
 #[test]
+#[cfg(feature = "documents")]
 fn test_extract_document_content_rejects_garbage() {
     assert!(extract_document_content(b"PK\x03\x04garbage", "application/epub+zip").is_err());
+}
+
+/// Without `documents`, an Office payload degrades to opaque bytes rather
+/// than erroring or being misread as text.
+#[test]
+#[cfg(not(feature = "documents"))]
+fn test_extract_document_content_degrades_to_binary() {
+    let mime = "application/epub+zip";
+    let payload = b"PK\x03\x04garbage";
+    let result = extract_document_content(payload, mime).expect("degraded extraction must succeed");
+    match result {
+        FetchedContent::Binary { mime: got, size } => {
+            assert_eq!(got, mime);
+            assert_eq!(size, payload.len());
+        },
+        _ => panic!("expected Binary for a document with the documents feature off"),
+    }
 }
 
 #[test]

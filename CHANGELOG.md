@@ -9,7 +9,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Changed
 - The minimum supported Rust version is now 1.99. Measured before the bump: three consecutive `cargo test --locked` runs on 1.99.0 passed 343 tests with 0 failures (278 + 20 + 13 + 9 + 19 + 4), and `cargo check --locked` finished clean, so the old `1.98` pin was stale rather than load-bearing. The `msrv` CI job, `clippy.toml`, the `Dockerfile` builder image, `CONTRIBUTING.md`, and `CLAUDE.md` now all say 1.99; a partial bump would have left the pin and its enforcement disagreeing.
 
-## [0.5.11] - 2026-10-31
+## [0.5.12] - 2026-10-31
+
+### Added
+- A `documents` feature, on by default, that owns the `anydoc` dependency. Turning it off removes `anydoc` and its whole subtree from the build, which currently includes `zip 8.6.0` and the three RUSTSEC-2026-0367/0368/0369 advisories that come with it. A consumer that only wants search or plain-text fetching can now depend on `default-features = false` and carry none of it. This is a semver-patch change: default builds behave exactly as before.
+
+### Changed
+- With `documents` off, Office/ebook content types (docx, xlsx, pptx, odt, epub, rtf, csv) are returned as `FetchedContent::Binary` under their declared MIME instead of converted Markdown. They still classify as documents rather than plain text, so a docx is never handed back as raw `text/xml`. The two arms are covered by mutually exclusive tests: `test_extract_document_content_rejects_garbage` with the feature, `test_extract_document_content_degrades_to_binary` without.
+
+
 
 ### Fixed
 - An empty or whitespace-only query returned a transport error instead of an empty result set. `perform_search` dispatched the degenerate query to the backends, whose unparseable pages surfaced as `Err`, so a caller passing an empty string could not tell a bad input from a provider outage. It now answers directly with an empty `SearchResponse`. This was a behaviour change from the 0.1.x line, where the same call returned an empty envelope.

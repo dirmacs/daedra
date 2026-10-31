@@ -64,6 +64,10 @@ pub(super) fn is_textual_content_type(ct: &str) -> bool {
 /// True for Office/ ebook content types that `anydoc` converts to
 /// Markdown. Checked BEFORE the textual-XML rule: the docx/odt MIME strings
 /// contain the substring "xml" but are zip containers, not text.
+/// True for Office/ebook content types that the `documents` feature can
+/// convert. Without that feature these MIMEs still classify as documents so
+/// the container is never mistaken for plain text — they are just delivered
+/// undecoded.
 pub(super) fn is_office_content_type(ct: &str) -> bool {
     ct.contains("officedocument")
         || ct.contains("msword")
@@ -87,6 +91,7 @@ pub(super) fn is_container_mime(ct: &str) -> bool {
 
 /// Convert an Office/ ebook document to Markdown via `anydoc`. Format
 /// detection runs on the bytes, so a wrong MIME header is survivable.
+#[cfg(feature = "documents")]
 pub(super) fn extract_document_content(bytes: &[u8], ct: &str) -> DaedraResult<FetchedContent> {
     // CSV has no byte signature; anydoc requires the format named for it.
     let format = if normalize_content_type(ct) == "text/csv" {
@@ -99,6 +104,18 @@ pub(super) fn extract_document_content(bytes: &[u8], ct: &str) -> DaedraResult<F
     Ok(FetchedContent::Document {
         mime: ct.to_string(),
         markdown,
+    })
+}
+
+/// Without the `documents` feature an Office/ ebook payload is returned as
+/// opaque bytes under its declared MIME. That is a deliberate degradation,
+/// not an error: the caller gets the document it asked for, just not
+/// converted, and the reason names the feature rather than blaming the file.
+#[cfg(not(feature = "documents"))]
+pub(super) fn extract_document_content(bytes: &[u8], ct: &str) -> DaedraResult<FetchedContent> {
+    Ok(FetchedContent::Binary {
+        mime: ct.to_string(),
+        size: bytes.len(),
     })
 }
 
