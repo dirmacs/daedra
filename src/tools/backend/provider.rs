@@ -443,8 +443,7 @@ impl SearchProvider {
             .collect();
 
         let total = pending.len();
-        let mut collected: Vec<(String, DaedraResult<SearchResponse>)> =
-            Vec::with_capacity(total);
+        let mut collected: Vec<(String, DaedraResult<SearchResponse>)> = Vec::with_capacity(total);
         let mut answered = 0usize;
         let mut soft_done = false;
 
