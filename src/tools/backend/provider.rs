@@ -678,9 +678,30 @@ cuit_note}",
             )));
         }
 
-        let mut merged = Self::merge_ranked_results(&by_source, &args.query, target_count);
+        // Constraints are enforced on the merged set BEFORE the relevance
+        // discard path, and scoring uses the CLEAN free text.
+        //
+        // Both orderings matter and both were measured wrong:
+        //   1. Scoring read the raw query, so `site`, `github` and `com` became
+        //      relevance tokens. That is why `site:github.com tokio async
+        //      runtime` surfaced tokio.rs: the domain words scored like content.
+        //   2. The constraint filter ran AFTER the "no results matched" discard
+        //      path, so a relaxed constraint could never surface as a note when
+        //      the discard fired first.
+        let filtered = super::query::apply_constraints(&structured, Self::merge_ranked_results(
+            &by_source,
+            &structured.text,
+            target_count,
+        ));
+        let mut merged = filtered.sources;
+        let relaxed = filtered.relaxed;
+        if !relaxed.is_empty() {
+            info!(relaxed = ?relaxed, "Query constraints could not be satisfied and were relaxed");
+        }
 
-        let tokens = query_tokens(&args.query);
+        // Empty free text (a directives-only query) carries no relevance
+        // signal; scoring it would reject everything for the wrong reason.
+        let tokens = query_tokens(&structured.text);
         if !tokens.is_empty() {
             let matched: Vec<bool> = merged
                 .iter()
@@ -700,13 +721,18 @@ cuit_note}",
                 // Nothing matched, not even a fragment: an engine ignored the
                 // query, and its output is worse than none for an agent.
                 let tried: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
-                return Err(DaedraError::SearchError(format!(
-                    "No search results matched the query {:?}; {} unrelated result(s) from [{}] \
-                     were discarded. Try fewer or different keywords.",
-                    args.query,
-                    merged.len(),
-                    tried.join(", ")
-                )));
+                // A relaxed constraint is a NOTE, never this error: the
+                // caller's filter was unsatisfiable, which is different from
+                // the engines returning nothing usable.
+                if relaxed.is_empty() {
+                    return Err(DaedraError::SearchError(format!(
+                        "No search results matched the query {:?}; {} unrelated result(s) from \
+                         [{}] were discarded. Try fewer or different keywords.",
+                        args.query,
+                        merged.len(),
+                        tried.join(", ")
+                    )));
+                }
             }
         }
 
@@ -718,19 +744,8 @@ cuit_note}",
             sources.len()
         );
 
-        // Enforce the directives leniently: a dimension that would eliminate
-        // every result is relaxed AND recorded, so the caller can tell an
-        // applied filter from an unsatisfiable one.
-        let filtered = super::query::apply_constraints(&structured, merged);
-        if !filtered.dropped.is_empty() {
-            info!(
-                dropped = ?filtered.dropped,
-                "Query constraints could not be satisfied and were relaxed"
-            );
-        }
-
-        Ok(SearchResponse::new(args.query.clone(), filtered.sources, &opts)
-            .with_dropped_constraints(filtered.dropped))
+        Ok(SearchResponse::new(args.query.clone(), merged, &opts)
+            .with_relaxed_constraints(relaxed))
     }
     /// List available backend names.
     pub fn available_backends(&self) -> Vec<&str> {

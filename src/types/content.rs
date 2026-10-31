@@ -109,5 +109,5 @@ pub struct SearchMetadata {
     /// that silently ignored `site:arxiv.org` is indistinguishable from one
     /// that honored it — which is the defect this list exists to prevent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dropped_constraints: Vec<String>,
+    pub relaxed_constraints: Vec<String>,
 }
