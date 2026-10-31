@@ -385,6 +385,7 @@ impl SearchProvider {
     }
 
     /// Override the aggregate deadlines (test seam).
+    #[cfg(test)]
     pub(super) fn with_deadlines(mut self, soft: Duration, hard: Duration) -> Self {
         self.soft_deadline = soft;
         self.hard_deadline = hard;
@@ -392,6 +393,7 @@ impl SearchProvider {
     }
 
     /// Override the per-backend deadline (test seam).
+    #[cfg(test)]
     pub(super) fn with_backend_deadline(mut self, d: Duration) -> Self {
         self.backend_deadline = d;
         self
@@ -407,6 +409,7 @@ impl SearchProvider {
     }
 
     /// Trait-object view of the registered backends (test seam).
+    #[cfg(test)]
     pub(super) fn backend_refs(&self) -> Vec<&dyn SearchBackend> {
         self.backends.iter().map(|b| b.as_ref()).collect()
     }
