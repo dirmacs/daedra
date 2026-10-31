@@ -60,7 +60,12 @@ impl MarginaliaBackend {
     pub fn with_base_url(base_url: String) -> Self {
         let client = Client::builder()
             .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(30))
+            // 3 s. The public shared endpoint answered `http=000` after 40 s
+            // on three consecutive probes from this host (2026-10-31), so on a
+            // host where it is unreachable this timeout is pure cost paid by
+            // EVERY search. 3 s still leaves ~15x headroom over a healthy
+            // Marginalia response (measured 0.5-0.7 s when it answers).
+            .timeout(Duration::from_secs(3))
             .build()
             .expect("Failed to build HTTP client");
         Self { client, base_url }
