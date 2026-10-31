@@ -698,3 +698,152 @@ async fn test_handle_transient_error() {
     assert!(!result.unwrap().data.is_empty());
     assert!(health.is_available());
 }
+
+// ── two-phase aggregate deadline ────────────────────────────────────────
+
+struct SlowBackend {
+    name: &'static str,
+    delay: Duration,
+    results: usize,
+}
+
+#[async_trait]
+impl SearchBackend for SlowBackend {
+    async fn search(&self, args: &SearchArgs) -> DaedraResult<SearchResponse> {
+        tokio::time::sleep(self.delay).await;
+        let opts = args.options.clone().unwrap_or_default();
+        let data: Vec<crate::types::SearchResult> = (0..self.results)
+            .map(|i| test_search_result(&format!("https://slow/{i}"), "slow"))
+            .collect();
+        Ok(SearchResponse::new(args.query.clone(), data, &opts))
+    }
+
+    fn name(&self) -> &str {
+        self.name
+    }
+}
+
+fn args_for(q: &str) -> SearchArgs {
+    SearchArgs {
+        query: q.to_string(),
+        options: None,
+    }
+}
+
+/// A backend that answers must not be held hostage by one that does not.
+/// Asserts ELAPSED TIME, not mere completion: `timeout(join_all(..))`
+/// would satisfy a completion assertion while still waiting for the
+/// slowest future.
+#[tokio::test]
+async fn slow_backend_does_not_block_fast_answer_past_soft_deadline() {
+    let fast = SlowBackend {
+        name: "fast",
+        delay: Duration::from_millis(20),
+        results: 1,
+    };
+    let slow = SlowBackend {
+        name: "slow",
+        delay: Duration::from_secs(60),
+        results: 1,
+    };
+    let provider = SearchProvider::new(vec![Box::new(fast), Box::new(slow)])
+        .with_deadlines(Duration::from_millis(300), Duration::from_secs(5));
+
+    let started = std::time::Instant::now();
+    let refs = provider.backend_refs();
+    let out = provider
+        .execute_concurrent_queries(&refs, &args_for("x"))
+        .await;
+    let elapsed = started.elapsed();
+
+    assert!(!out.is_empty(), "the answered backend must be returned");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "must return near the soft deadline, not wait for the 60s backend (took {elapsed:?})"
+    );
+}
+
+/// With nothing answering, the call must return at the hard deadline, not
+/// hang. The hard deadline is set BELOW BACKEND_DEADLINE so this phase is
+/// reachable; in production the per-backend cap resolves first and the
+/// hard timer is a backstop.
+#[tokio::test]
+async fn all_slow_backends_return_at_hard_deadline() {
+    let a = SlowBackend {
+        name: "slow-a",
+        delay: Duration::from_secs(120),
+        results: 1,
+    };
+    let b = SlowBackend {
+        name: "slow-b",
+        delay: Duration::from_secs(120),
+        results: 1,
+    };
+    let provider = SearchProvider::new(vec![Box::new(a), Box::new(b)])
+        .with_deadlines(Duration::from_millis(200), Duration::from_millis(700));
+
+    let started = std::time::Instant::now();
+    let refs = provider.backend_refs();
+    let out = provider
+        .execute_concurrent_queries(&refs, &args_for("x"))
+        .await;
+    let elapsed = started.elapsed();
+
+    // Nothing SUCCEEDED. The collector still reports the abandoned
+    // backends as error entries, which is deliberate: a backend that
+    // disappears from the result set reads as "it answered nothing".
+    assert!(
+        out.iter().all(|(_, r)| r.is_err()),
+        "nothing had answered yet; expected only abandonment errors"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(650) && elapsed < Duration::from_secs(3),
+        "must return AT the hard deadline, not earlier and not hang (took {elapsed:?})"
+    );
+}
+
+/// A backend that blows its per-backend deadline must be CHARGED a
+/// circuit-breaker failure, not silently abandoned.
+///
+/// This is the part of the deadline path that has behavioural
+/// consequences beyond latency: an endpoint that keeps timing out has to
+/// eventually stop being asked. Without the charge, a dead backend costs
+/// BACKEND_DEADLINE on every single search forever.
+///
+/// The assertion is on breaker state (`is_available()` after enough
+/// charges), not on log output, because breaker state is what the next
+/// search actually reads.
+#[tokio::test]
+async fn backend_exceeding_deadline_is_charged_a_circuit_failure() {
+    // Delay far past BACKEND_DEADLINE (5s) so the per-backend timeout path
+    // is the one that fires.
+    let hung = SlowBackend {
+        name: "hung",
+        delay: Duration::from_secs(120),
+        results: 1,
+    };
+    let provider = SearchProvider::new(vec![Box::new(hung)])
+        .with_deadlines(Duration::from_millis(100), Duration::from_millis(400));
+
+    let refs = provider.backend_refs();
+    let out = provider
+        .execute_concurrent_queries(&refs, &args_for("x"))
+        .await;
+
+    // The backend was abandoned, and it surfaced as an error entry rather
+    // than vanishing (a silently dropped backend looks like "it answered
+    // nothing", which is a different and misleading claim).
+    assert_eq!(out.len(), 1, "an abandoned backend must still be reported");
+    assert!(out[0].1.is_err(), "deadline abandonment must be an error");
+
+    // Assert the CHARGE, not threshold-crossing: the breaker opens at 3
+    // and a single abandoned search charges fewer than that, so
+    // `is_available()` would report "closed" even though the charge
+    // landed.
+    let breaker = provider.breaker_for("hung").expect("breaker exists");
+    assert!(
+        breaker.consecutive_failures() >= 1,
+        "the abandoned backend must be charged a failure (got {})",
+        breaker.consecutive_failures()
+    );
+}
