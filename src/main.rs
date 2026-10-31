@@ -586,13 +586,24 @@ async fn check_search_connectivity(reporter: &CheckReporter) -> bool {
     match provider.search(&test_args).await {
         Ok(response) => {
             if response.data.is_empty() {
-                reporter.warn("Search returned no results");
-                reporter.entry("connectivity", true, "search ran, 0 results");
+                // A successful call that yields nothing is NOT a passing check.
+                // The previous version logged a warning and then still recorded
+                // `ok: true`, so `check` printed "All checks passed!" on a host
+                // where wikipedia answered zero and brave/bing/google/duckduckgo
+                // were all bot-blocked. A gate that reports success without
+                // producing a result is the failure mode this repo's own
+                // directives call a false green.
+                reporter.fail("Search ran but returned 0 results");
+                reporter.entry("connectivity", false, "search ran, 0 results");
+                false
             } else {
-                reporter.ok("Search connectivity verified");
+                reporter.ok(&format!(
+                    "Search connectivity verified ({} result(s))",
+                    response.data.len()
+                ));
                 reporter.entry("connectivity", true, "search verified");
+                true
             }
-            true
         },
         Err(e) => {
             reporter.fail(&format!("Search test: {e}"));
