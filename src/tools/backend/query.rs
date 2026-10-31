@@ -63,9 +63,6 @@ pub struct StructuredQuery {
     pub in_title: Vec<String>,
     /// `-intitle:` substrings — none may appear in the title.
     pub excluded_in_title: Vec<String>,
-    /// `intext:`/`inbody:` substrings. Not post-filterable (snippets are
-    /// partial); query-building only.
-    pub in_text: Vec<String>,
     /// `filetype:`/`ext:` extensions, lowercased without the dot.
     pub filetypes: Vec<String>,
     /// `lang:`/`language:` values, lowercased.
@@ -85,7 +82,7 @@ pub struct ConstraintFilter {
     /// Renderings (`site:arxiv.org`, `before:2024-01-01`, …) of constraint
     /// dimensions that matched zero sources and were therefore relaxed
     /// instead of enforced.
-    pub dropped: Vec<String>,
+    pub relaxed: Vec<String>,
 }
 
 /// Recognizes a leading `[-]name:value` directive.
@@ -176,9 +173,11 @@ pub fn parse(raw: &str) -> StructuredQuery {
             ("intitle" | "title" | "allintitle", true) => {
                 q.excluded_in_title.push(value.to_lowercase());
             },
-            ("intext" | "inbody" | "inanchor" | "allintext", _) => {
-                q.in_text.push(value.to_lowercase());
-            },
+            // `intext:`/`inbody:` are deliberately NOT parsed. Snippets are
+            // partial, so a body substring cannot be post-filtered reliably;
+            // claiming to enforce it would be a filter that lies. These fall
+            // through to the free text so an engine that understands them can
+            // still use them.
             ("filetype" | "ext", _) => {
                 let v = value.trim_start_matches('.').to_lowercase();
                 if !v.is_empty() {
@@ -302,12 +301,12 @@ pub fn format_for_engine(q: &StructuredQuery) -> String {
 /// Apply the constraints that the query carries to a result set, leniently.
 ///
 /// A constraint dimension that would eliminate EVERY result is dropped and
-/// recorded in [`ConstraintFilter::dropped`] rather than enforced. Dimensions
+/// recorded in [`ConstraintFilter::relaxed`] rather than enforced. Dimensions
 /// are applied one at a time so that the caller learns exactly which filter
 /// could not be satisfied.
 pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> ConstraintFilter {
     let mut sources = results;
-    let mut dropped = Vec::new();
+    let mut relaxed = Vec::new();
 
     if !q.sites.is_empty() {
         let kept: Vec<SearchResult> = sources
@@ -316,7 +315,7 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
             .cloned()
             .collect();
         if kept.is_empty() && !sources.is_empty() {
-            dropped.extend(q.sites.iter().map(|s| format!("site:{s}")));
+            relaxed.extend(q.sites.iter().map(|s| format!("site:{s}")));
         } else {
             sources = kept;
         }
@@ -331,7 +330,7 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
             .cloned()
             .collect();
         if kept.is_empty() && !sources.is_empty() {
-            dropped.extend(q.excluded_sites.iter().map(|s| format!("-site:{s}")));
+            relaxed.extend(q.excluded_sites.iter().map(|s| format!("-site:{s}")));
         } else {
             sources = kept;
         }
@@ -347,7 +346,7 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
             .cloned()
             .collect();
         if kept.is_empty() && !sources.is_empty() {
-            dropped.extend(q.in_url.iter().map(|s| format!("inurl:{s}")));
+            relaxed.extend(q.in_url.iter().map(|s| format!("inurl:{s}")));
         } else {
             sources = kept;
         }
@@ -363,7 +362,7 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
             .cloned()
             .collect();
         if kept.is_empty() && !sources.is_empty() {
-            dropped.extend(q.in_title.iter().map(|s| format!("intitle:{s}")));
+            relaxed.extend(q.in_title.iter().map(|s| format!("intitle:{s}")));
         } else {
             sources = kept;
         }
@@ -381,13 +380,13 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
             .cloned()
             .collect();
         if kept.is_empty() && !sources.is_empty() {
-            dropped.extend(q.filetypes.iter().map(|f| format!("filetype:{f}")));
+            relaxed.extend(q.filetypes.iter().map(|f| format!("filetype:{f}")));
         } else {
             sources = kept;
         }
     }
 
-    ConstraintFilter { sources, dropped }
+    ConstraintFilter { sources, relaxed }
 }
 
 /// True when `url`'s host matches, or is a subdomain of, any candidate.
@@ -441,6 +440,15 @@ mod tests {
     }
 
     #[test]
+    fn intext_is_not_parsed_into_a_constraint() {
+        // Body substrings cannot be post-filtered from partial snippets, so
+        // `intext:` must stay in the free text rather than produce a filter
+        // that cannot be enforced.
+        let q = parse("intext:secret tokio");
+        assert!(q.text.contains("intext:secret"));
+    }
+
+    #[test]
     fn parses_filetype_and_lang() {
         let q = parse("async filetype:.pdf lang:EN");
         assert_eq!(q.filetypes, vec!["pdf"]);
@@ -479,7 +487,7 @@ mod tests {
         );
         assert_eq!(got.sources.len(), 1);
         assert_eq!(got.sources[0].url, "https://github.com/a/b");
-        assert!(got.dropped.is_empty());
+        assert!(got.relaxed.is_empty());
     }
 
     #[test]
@@ -489,11 +497,19 @@ mod tests {
         assert_eq!(got.sources.len(), 1);
     }
 
-    /// The measured regression: `site:` returned a non-matching host and the
-    /// caller was never told. When NOTHING matches, the constraint is dropped
-    /// and reported rather than emptying the result set.
+    /// Deterministic pin of the measured regression, at the filter level.
+    ///
+    /// When at least one result DOES match, non-matching hosts must be gone.
+    /// Live tests cannot assert this unconditionally: backend availability
+    /// varies between runs, and a run where no engine returns a github.com hit
+    /// legitimately relaxes the constraint (see the relaxation test below).
+    /// The always-true live guarantee is the disjunction pinned by
+    /// `constraint_is_either_enforced_or_reported`.
+    ///
+    /// When NOTHING matches, the constraint is relaxed and reported rather
+    /// than emptying the result set.
     #[test]
-    fn unsatisfiable_site_is_dropped_and_reported() {
+    fn unsatisfiable_site_is_relaxed_and_reported() {
         let q = parse("site:arxiv.org x");
         let got = apply_constraints(
             &q,
@@ -503,7 +519,7 @@ mod tests {
             ],
         );
         assert_eq!(got.sources.len(), 2, "results must survive a dropped constraint");
-        assert_eq!(got.dropped, vec!["site:arxiv.org"]);
+        assert_eq!(got.relaxed, vec!["site:arxiv.org"]);
     }
 
     /// The other measured regression: `-site:` still returned the excluded
@@ -540,12 +556,59 @@ mod tests {
         let q = parse("just words");
         let got = apply_constraints(&q, vec![result("https://a.example/1", "A")]);
         assert_eq!(got.sources.len(), 1);
-        assert!(got.dropped.is_empty());
+        assert!(got.relaxed.is_empty());
     }
 
     #[test]
     fn format_for_engine_is_never_empty_for_directive_only_query() {
         let q = parse("site:github.com");
         assert!(!format_for_engine(&q).is_empty());
+    }
+}
+
+/// Invariant that holds on EVERY run, regardless of which backends answered:
+/// either the results satisfy the constraint, or the constraint appears in
+/// `relaxed`. There is no third state where a filter silently does not apply.
+#[cfg(test)]
+mod invariant_tests {
+    use super::SearchResult;
+
+    fn result(url: &str, title: &str) -> SearchResult {
+        SearchResult {
+            title: title.to_string(),
+            url: url.to_string(),
+            description: String::new(),
+            metadata: crate::types::ResultMetadata {
+                content_type: crate::types::ContentType::Other,
+                source: "test".to_string(),
+                favicon: None,
+                published_date: None,
+            },
+        }
+    }
+
+    #[test]
+    fn constraint_is_either_enforced_or_reported() {
+        let q = super::parse("site:github.com tokio async runtime");
+        for sample in [
+            vec![result("https://github.com/a/b", "GH"), result("https://tokio.rs/x", "Tokio")],
+            vec![result("https://tokio.rs/x", "Tokio")],
+            vec![],
+        ] {
+            let original_len = sample.len();
+            let got = super::apply_constraints(&q, sample);
+            let all_match = got
+                .sources
+                .iter()
+                .all(|r| r.url.contains("github.com"));
+            let reported = got.relaxed.iter().any(|c| c.contains("github.com"));
+            assert!(
+                all_match || reported,
+                "a constraint that did not apply MUST be reported: {original_len} in, \
+                 {} out, relaxed={:?}",
+                got.sources.len(),
+                got.relaxed
+            );
+        }
     }
 }
