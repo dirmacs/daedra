@@ -100,4 +100,14 @@ pub struct SearchMetadata {
 
     /// Query analysis results
     pub query_analysis: QueryAnalysis,
+
+    /// Query constraint dimensions (`site:`, `intitle:`, `filetype:`, ...) that
+    /// matched no result and were therefore RELAXED rather than enforced.
+    ///
+    /// Present so a caller can tell the difference between "the filter
+    /// applied" and "the filter could not be satisfied". Without it, a search
+    /// that silently ignored `site:arxiv.org` is indistinguishable from one
+    /// that honored it — which is the defect this list exists to prevent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relaxed_constraints: Vec<String>,
 }

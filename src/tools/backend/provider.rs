@@ -587,6 +587,13 @@ cuit_note}",
         let opts = args.options.clone().unwrap_or_default();
         let target_count = opts.num_results;
 
+        // Parse Google-style directives (`site:`, `intitle:`, `filetype:`,
+        // `after:`) out of the raw query ONCE. Measured 2026-10-31: every
+        // backend was handed the raw string, none understood it, and nothing
+        // reported that the filter had not applied — `site:github.com`
+        // returned tokio.rs and `-site:github.com` returned github.com.
+        let structured = super::query::parse(&args.query);
+
         self.rate_limiter.until_ready().await;
 
         if args.query.trim().is_empty() {
@@ -639,7 +646,14 @@ cuit_note}",
             ));
         }
 
-        let results = self.execute_concurrent_queries(&queryable, args).await;
+        // Backends receive the free text plus the operators they might honor;
+        // enforcement happens below on the merged set.
+        let mut backend_args = args.clone();
+        backend_args.query = super::query::format_for_engine(&structured);
+
+        let results = self
+            .execute_concurrent_queries(&queryable, &backend_args)
+            .await;
         let (by_source, any_success, tried, failures) = Self::categorize_results(results);
 
         if !any_success {
@@ -666,9 +680,29 @@ cuit_note}",
             )));
         }
 
-        let mut merged = Self::merge_ranked_results(&by_source, &args.query, target_count);
+        // Constraints are enforced on the merged set BEFORE the relevance
+        // discard path, and scoring uses the CLEAN free text.
+        //
+        // Both orderings matter and both were measured wrong:
+        //   1. Scoring read the raw query, so `site`, `github` and `com` became
+        //      relevance tokens. That is why `site:github.com tokio async
+        //      runtime` surfaced tokio.rs: the domain words scored like content.
+        //   2. The constraint filter ran AFTER the "no results matched" discard
+        //      path, so a relaxed constraint could never surface as a note when
+        //      the discard fired first.
+        let filtered = super::query::apply_constraints(
+            &structured,
+            Self::merge_ranked_results(&by_source, &structured.text, target_count),
+        );
+        let mut merged = filtered.sources;
+        let relaxed = filtered.relaxed;
+        if !relaxed.is_empty() {
+            info!(relaxed = ?relaxed, "Query constraints could not be satisfied and were relaxed");
+        }
 
-        let tokens = query_tokens(&args.query);
+        // Empty free text (a directives-only query) carries no relevance
+        // signal; scoring it would reject everything for the wrong reason.
+        let tokens = query_tokens(&structured.text);
         if !tokens.is_empty() {
             let matched: Vec<bool> = merged
                 .iter()
@@ -688,13 +722,18 @@ cuit_note}",
                 // Nothing matched, not even a fragment: an engine ignored the
                 // query, and its output is worse than none for an agent.
                 let tried: Vec<String> = by_source.iter().map(|(n, _)| n.clone()).collect();
-                return Err(DaedraError::SearchError(format!(
-                    "No search results matched the query {:?}; {} unrelated result(s) from [{}] \
-                     were discarded. Try fewer or different keywords.",
-                    args.query,
-                    merged.len(),
-                    tried.join(", ")
-                )));
+                // A relaxed constraint is a NOTE, never this error: the
+                // caller's filter was unsatisfiable, which is different from
+                // the engines returning nothing usable.
+                if relaxed.is_empty() {
+                    return Err(DaedraError::SearchError(format!(
+                        "No search results matched the query {:?}; {} unrelated result(s) from \
+                         [{}] were discarded. Try fewer or different keywords.",
+                        args.query,
+                        merged.len(),
+                        tried.join(", ")
+                    )));
+                }
             }
         }
 
@@ -706,7 +745,10 @@ cuit_note}",
             sources.len()
         );
 
-        Ok(SearchResponse::new(args.query.clone(), merged, &opts))
+        Ok(
+            SearchResponse::new(args.query.clone(), merged, &opts)
+                .with_relaxed_constraints(relaxed),
+        )
     }
     /// List available backend names.
     pub fn available_backends(&self) -> Vec<&str> {

@@ -217,7 +217,14 @@ impl SearchResponse {
                     num_results: Some(options.num_results),
                 },
                 query_analysis: QueryAnalysis { language, topics },
+                relaxed_constraints: Vec::new(),
             },
         }
+    }
+
+    /// Record query-constraint dimensions that could not be satisfied.
+    pub fn with_relaxed_constraints(mut self, dropped: Vec<String>) -> Self {
+        self.metadata.relaxed_constraints = dropped;
+        self
     }
 }
