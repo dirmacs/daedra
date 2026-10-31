@@ -651,7 +651,9 @@ cuit_note}",
         let mut backend_args = args.clone();
         backend_args.query = super::query::format_for_engine(&structured);
 
-        let results = self.execute_concurrent_queries(&queryable, &backend_args).await;
+        let results = self
+            .execute_concurrent_queries(&queryable, &backend_args)
+            .await;
         let (by_source, any_success, tried, failures) = Self::categorize_results(results);
 
         if !any_success {
@@ -688,11 +690,10 @@ cuit_note}",
         //   2. The constraint filter ran AFTER the "no results matched" discard
         //      path, so a relaxed constraint could never surface as a note when
         //      the discard fired first.
-        let filtered = super::query::apply_constraints(&structured, Self::merge_ranked_results(
-            &by_source,
-            &structured.text,
-            target_count,
-        ));
+        let filtered = super::query::apply_constraints(
+            &structured,
+            Self::merge_ranked_results(&by_source, &structured.text, target_count),
+        );
         let mut merged = filtered.sources;
         let relaxed = filtered.relaxed;
         if !relaxed.is_empty() {
@@ -744,8 +745,10 @@ cuit_note}",
             sources.len()
         );
 
-        Ok(SearchResponse::new(args.query.clone(), merged, &opts)
-            .with_relaxed_constraints(relaxed))
+        Ok(
+            SearchResponse::new(args.query.clone(), merged, &opts)
+                .with_relaxed_constraints(relaxed),
+        )
     }
     /// List available backend names.
     pub fn available_backends(&self) -> Vec<&str> {

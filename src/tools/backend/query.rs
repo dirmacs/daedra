@@ -114,9 +114,7 @@ fn normalize_date(v: &str) -> Option<String> {
     let v = v.trim().replace('/', "-");
     let parts: Vec<&str> = v.split('-').collect();
     match parts.as_slice() {
-        [y] if y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()) => {
-            Some(format!("{y}-01-01"))
-        },
+        [y] if y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()) => Some(format!("{y}-01-01")),
         [y, m] if y.len() == 4 && m.len() <= 2 => {
             let m: u32 = m.parse().ok()?;
             (1..=12).contains(&m).then(|| format!("{y}-{m:02}-01"))
@@ -124,8 +122,7 @@ fn normalize_date(v: &str) -> Option<String> {
         [y, m, d] if y.len() == 4 && m.len() <= 2 && d.len() <= 2 => {
             let m: u32 = m.parse().ok()?;
             let d: u32 = d.parse().ok()?;
-            ((1..=12).contains(&m) && (1..=31).contains(&d))
-                .then(|| format!("{y}-{m:02}-{d:02}"))
+            ((1..=12).contains(&m) && (1..=31).contains(&d)).then(|| format!("{y}-{m:02}-{d:02}"))
         },
         _ => None,
     }
@@ -391,7 +388,9 @@ pub fn apply_constraints(q: &StructuredQuery, results: Vec<SearchResult>) -> Con
 
 /// True when `url`'s host matches, or is a subdomain of, any candidate.
 fn host_matches_any(url: &str, candidates: &[String]) -> bool {
-    let Some(host) = url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_lowercase))
+    let Some(host) = url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_lowercase))
     else {
         return false;
     };
@@ -472,7 +471,11 @@ mod tests {
     #[test]
     fn keeps_quoted_phrases_whole() {
         let q = parse("\"exact phrase here\" tokio");
-        assert!(q.terms.iter().any(|t| t.phrase && t.text == "exact phrase here"));
+        assert!(
+            q.terms
+                .iter()
+                .any(|t| t.phrase && t.text == "exact phrase here")
+        );
     }
 
     #[test]
@@ -518,7 +521,11 @@ mod tests {
                 result("https://github.com/b", "GitHub"),
             ],
         );
-        assert_eq!(got.sources.len(), 2, "results must survive a dropped constraint");
+        assert_eq!(
+            got.sources.len(),
+            2,
+            "results must survive a dropped constraint"
+        );
         assert_eq!(got.relaxed, vec!["site:arxiv.org"]);
     }
 
@@ -591,16 +598,16 @@ mod invariant_tests {
     fn constraint_is_either_enforced_or_reported() {
         let q = super::parse("site:github.com tokio async runtime");
         for sample in [
-            vec![result("https://github.com/a/b", "GH"), result("https://tokio.rs/x", "Tokio")],
+            vec![
+                result("https://github.com/a/b", "GH"),
+                result("https://tokio.rs/x", "Tokio"),
+            ],
             vec![result("https://tokio.rs/x", "Tokio")],
             vec![],
         ] {
             let original_len = sample.len();
             let got = super::apply_constraints(&q, sample);
-            let all_match = got
-                .sources
-                .iter()
-                .all(|r| r.url.contains("github.com"));
+            let all_match = got.sources.iter().all(|r| r.url.contains("github.com"));
             let reported = got.relaxed.iter().any(|c| c.contains("github.com"));
             assert!(
                 all_match || reported,
