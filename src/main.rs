@@ -56,7 +56,22 @@ mod tests {
     }
 
     use super::*;
-    use daedra::types::{ContentType, PageLink, ResultMetadata};
+    use crate::cli::args::{
+        CrawlEngineOption, GlobalArgs, OutputFormat, SafeSearchOption, TransportOption,
+        safe_search_from_u8,
+    };
+    use crate::cli::check::{check_section_message, check_summary_message, should_print_banner};
+    use crate::cli::commands::teaser;
+    use crate::cli::config::build_cache_config;
+    use crate::cli::pretty::{
+        format_page_content_pretty, format_search_header_pretty, format_search_result_pretty,
+    };
+    use crate::cli::serve::parse_host_octets;
+    use daedra::types::{
+        ContentType, PageContent, PageLink, ResultMetadata, SafeSearchLevel, SearchOptions,
+        SearchResult,
+    };
+    use std::time::Duration;
 
     #[test]
     fn test_teaser_is_char_boundary_safe() {

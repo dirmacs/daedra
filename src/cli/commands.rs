@@ -178,7 +178,7 @@ pub(super) async fn run_search(
 
 /// Print a search response in the requested format (shared by cache hits
 /// and fresh runs).
-pub(super) fn print_search(
+pub(crate) fn print_search(
     query: &str,
     response: daedra::types::SearchResponse,
     format: OutputFormat,
@@ -241,7 +241,7 @@ pub(super) async fn run_fetch(
 }
 
 /// Print fetched page content in the requested format.
-pub(super) fn print_page(
+pub(crate) fn print_page(
     content: &daedra::types::PageContent,
     format: OutputFormat,
     no_color: bool,
@@ -301,7 +301,7 @@ pub(super) async fn run_crawl(
 
 /// Char-boundary-safe teaser: first `n` characters of `s`, never splitting
 /// a multi-byte character.
-pub(super) fn teaser(s: &str, n: usize) -> &str {
+pub(crate) fn teaser(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[..i],
         None => s,
@@ -310,7 +310,7 @@ pub(super) fn teaser(s: &str, n: usize) -> &str {
 
 /// The four MCP tools, with the same names and descriptions the server
 /// advertises over `tools/list`. `info` must never drift from this.
-pub(super) const MCP_TOOLS: [(&str, &str); 4] = [
+pub(crate) const MCP_TOOLS: [(&str, &str); 4] = [
     (
         "web_search",
         "Search the web across all backends with fallback",
@@ -323,7 +323,7 @@ pub(super) const MCP_TOOLS: [(&str, &str); 4] = [
     ("crawl_site", "Crawl a site via sitemap or link discovery"),
 ];
 
-pub(super) fn run_info(no_color: bool, format: OutputFormat) {
+pub(crate) fn run_info(no_color: bool, format: OutputFormat) {
     if format == OutputFormat::Json || format == OutputFormat::JsonCompact {
         let info = serde_json::json!({
             "name": SERVER_NAME,

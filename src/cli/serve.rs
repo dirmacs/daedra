@@ -10,7 +10,7 @@ use std::net::ToSocketAddrs;
 
 use crate::cli::args::TransportOption;
 
-pub(super) fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
+pub(crate) fn parse_host_octets(host: &str) -> DaedraResult<[u8; 4]> {
     if host.eq_ignore_ascii_case("localhost") {
         return Ok([127, 0, 0, 1]);
     }

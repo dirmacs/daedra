@@ -36,7 +36,7 @@ pub fn setup_logging(verbose: bool, use_stderr: bool, quiet: bool) {
     }
 }
 
-pub(super) fn print_banner() {
+pub(crate) fn print_banner() {
     println!(
         r#"
 {}
@@ -55,7 +55,7 @@ pub(super) fn print_banner() {
     );
 }
 
-pub(super) fn print_success(message: &str) {
+pub(crate) fn print_success(message: &str) {
     println!("{} {}", "✓".green().bold(), message);
 }
 
@@ -63,15 +63,15 @@ pub fn print_error(message: &str) {
     eprintln!("{} {}", "✗".red().bold(), message);
 }
 
-pub(super) fn print_info(label: &str, value: &str) {
+pub(crate) fn print_info(label: &str, value: &str) {
     println!("  {} {}", format!("{}:", label).bright_blue(), value);
 }
 
-pub(super) fn print_section(title: &str) {
+pub(crate) fn print_section(title: &str) {
     println!("{}", format_section(title));
 }
 
-pub(super) fn format_section(title: &str) -> String {
+pub(crate) fn format_section(title: &str) -> String {
     format!(
         "\n{}\n{}",
         title.yellow().bold(),
@@ -79,6 +79,6 @@ pub(super) fn format_section(title: &str) -> String {
     )
 }
 
-pub(super) fn format_info(label: &str, value: &str) -> String {
+pub(crate) fn format_info(label: &str, value: &str) -> String {
     format!("  {} {}\n", format!("{}:", label).bright_blue(), value)
 }

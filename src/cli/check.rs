@@ -10,7 +10,7 @@ use daedra::{
 use crate::cli::args::{OutputFormat, TransportOption};
 use crate::cli::logging::*;
 
-pub(super) fn check_section_message(title: &str) -> String {
+pub(crate) fn check_section_message(title: &str) -> String {
     match title {
         "Configuration Check" => "
 Checking Daedra configuration..."
@@ -22,7 +22,7 @@ Testing search functionality..."
     }
 }
 
-pub(super) fn check_summary_message(all_ok: bool, no_color: bool) -> String {
+pub(crate) fn check_summary_message(all_ok: bool, no_color: bool) -> String {
     if all_ok {
         if no_color {
             "All checks passed!".to_string()
@@ -36,7 +36,7 @@ pub(super) fn check_summary_message(all_ok: bool, no_color: bool) -> String {
     }
 }
 
-pub(super) fn should_print_banner(
+pub(crate) fn should_print_banner(
     verbose: bool,
     quiet: bool,
     format: OutputFormat,
@@ -48,7 +48,7 @@ pub(super) fn should_print_banner(
         && matches!(transport, TransportOption::Sse)
 }
 
-pub(super) struct CheckReporter {
+pub(crate) struct CheckReporter {
     no_color: bool,
     /// Every reported outcome, kept in order so `-f json` can print the
     /// same report machine-readably.
@@ -147,7 +147,7 @@ impl CheckReporter {
     }
 }
 
-pub(super) fn check_search_client(reporter: &CheckReporter) -> bool {
+pub(crate) fn check_search_client(reporter: &CheckReporter) -> bool {
     match search::SearchClient::new() {
         Ok(_) => {
             reporter.ok("Search client initialized");
@@ -164,7 +164,7 @@ pub(super) fn check_search_client(reporter: &CheckReporter) -> bool {
 
 /// Report which optional quota tokens are set. A missing token is not a
 /// failure — search still runs on public endpoints.
-pub(super) fn check_api_keys(reporter: &CheckReporter) {
+pub(crate) fn check_api_keys(reporter: &CheckReporter) {
     let keys = [
         ("GITHUB_TOKEN", "GitHub (higher rate limits)"),
         ("MARGINALIA_API_KEY", "Marginalia (higher rate limits)"),
@@ -194,7 +194,7 @@ pub(super) fn check_api_keys(reporter: &CheckReporter) {
     );
 }
 
-pub(super) fn check_fetch_client(reporter: &CheckReporter) -> bool {
+pub(crate) fn check_fetch_client(reporter: &CheckReporter) -> bool {
     match fetch::FetchClient::new() {
         Ok(_) => {
             reporter.ok("Fetch client initialized");
