@@ -2,6 +2,7 @@
 
 use clap::CommandFactory;
 use colored::Colorize;
+#[cfg(feature = "crawlberg")]
 use daedra::tools::crawl_site_with_crawlberg;
 use daedra::{
     DaedraResult, SERVER_NAME, VERSION,

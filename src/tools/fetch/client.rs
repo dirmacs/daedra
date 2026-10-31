@@ -737,7 +737,15 @@ pub fn is_valid_url(url: &str) -> bool {
     }
 }
 
-/// Convert HTML to Markdown
+/// Convert HTML to Markdown.
+///
+/// Gated to match its re-export in `fetch/mod.rs` and its only caller in
+/// `crawl.rs`, both of which are `#[cfg(feature = "crawlberg")]`. Without the
+/// attribute a default-feature build compiles this yet nothing can reach it,
+/// which `-D warnings` rejects as dead code. CI only builds `--all-features`,
+/// so the mismatch was invisible there and surfaced when `cargo publish`
+/// verified the packaged tarball with default features.
+#[cfg(feature = "crawlberg")]
 pub fn html_to_page_content(
     html: &str,
     url: &str,
