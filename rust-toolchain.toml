@@ -1,0 +1,7 @@
+# The pin is necessary but NOT sufficient on this host — the session exports
+# RUSTUP_TOOLCHAIN=1.95.0, and an explicit RUSTUP_TOOLCHAIN beats this file. Every build and CI
+# job therefore sets RUSTUP_TOOLCHAIN=1.99.0 explicitly. This file is the floor, not the guarantee.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
