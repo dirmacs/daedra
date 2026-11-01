@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.14] - 2026-11-01
+
+### Added
+- Fetched and crawled pages now carry contact addresses, in a new `emails` field on `PageContent` and `CrawledPage`. `mailto:` targets cannot ride on the existing `links` list because `is_skippable_href` drops them before any caller sees them, and the raw `Html` is discarded once the page is built; extraction therefore runs where both are still in scope. Five false-positive classes are filtered, each with a test: a link label glued onto its target (`Emailbuild@dirmacs.com`), asset filenames (`sprite@2x.png`), reserved placeholder domains, Fediverse handles, and URL fragments read as local parts (`//medium.com/@user`).
+- `emails` is also read from schema.org `application/ld+json` blocks. Some sites publish a contact address nowhere else: `mainmatter.com` carries `info@mainmatter.com` at `@graph[0].contactPoint[1].email` and never in visible markup.
+
+### Changed
+- Each address now records which surface it came from, ranked `Mailto` > `JsonLd` > `BodyText`. When one address appears on several surfaces the most confident sighting wins and the address is reported once.
+- A structured-data block that fails to parse is skipped rather than failing the page, so malformed JSON-LD cannot cost a caller the `mailto:` and text results.
+
+### Fixed
+- Query constraints that could not be satisfied were relaxed silently unless the caller used `-f json`. The default pretty output now prints `NOTE: constraint(s) not applied — <list>. Results below are UNSCOPED.` so a widened query is visible. Two tests pin both directions: the notice names the dropped constraint, and no notice appears when nothing was relaxed.
+
 ### Changed
 - The minimum supported Rust version is now 1.99. Measured before the bump: three consecutive `cargo test --locked` runs on 1.99.0 passed 343 tests with 0 failures (278 + 20 + 13 + 9 + 19 + 4), and `cargo check --locked` finished clean, so the old `1.98` pin was stale rather than load-bearing. The `msrv` CI job, `clippy.toml`, the `Dockerfile` builder image, `CONTRIBUTING.md`, and `CLAUDE.md` now all say 1.99; a partial bump would have left the pin and its enforcement disagreeing.
 
