@@ -598,6 +598,7 @@ fn test_format_page_result() {
         word_count: 2,
         content_type: None,
         links: None,
+        emails: None,
     };
     let formatted = format_page_result(&content);
     assert!(formatted.contains("Example"));

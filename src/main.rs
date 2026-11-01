@@ -198,6 +198,7 @@ Testing search functionality..."
                 text: "Other".to_string(),
                 url: "https://example.com/other".to_string(),
             }]),
+            emails: None,
         }
     }
 

@@ -428,6 +428,11 @@ async fn collect_crawl_results(
                     title: page.title,
                     markdown: page.content,
                     links,
+                    // Carried through from `build_page_from_html`, which is the
+                    // only place raw HTML — and therefore `mailto:` — is in
+                    // scope. Dropping this here would compute the addresses and
+                    // then discard them.
+                    emails: page.emails,
                 });
             },
             Ok(Some((url, Err(e)))) => errors.push(CrawlError {
@@ -493,6 +498,7 @@ pub async fn crawl_site_with_crawlberg(args: CrawlArgs) -> DaedraResult<CrawlRes
                     .links
                     .map(|l| l.into_iter().map(|p| p.url).collect())
                     .unwrap_or_default(),
+                emails: content.emails,
             }),
             Err(e) => errors.push(crate::types::CrawlError {
                 url: page.url.clone(),

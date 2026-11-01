@@ -54,6 +54,15 @@ pub struct CrawledPage {
 
     /// Outbound link URLs discovered on the page
     pub links: Vec<String>,
+
+    /// Contact addresses found on the page, sorted and deduplicated.
+    ///
+    /// Absent rather than empty when there were none, matching
+    /// [`crate::types::PageContent::emails`]. Without this field the crawl
+    /// would compute addresses and then discard them, because `CrawledPage` is
+    /// built from `PageContent` rather than being one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emails: Option<Vec<String>>,
 }
 
 /// Error record for a URL that could not be fetched during a crawl.

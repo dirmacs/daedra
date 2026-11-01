@@ -132,6 +132,7 @@ fn test_page_content_serialize_deserialize() {
             text: "Link".to_string(),
             url: "https://example.com/other".to_string(),
         }]),
+        emails: Some(vec!["hello@example.com".to_string()]),
     };
     let json = serde_json::to_string(&page).unwrap();
     let round_trip: PageContent = serde_json::from_str(&json).unwrap();
