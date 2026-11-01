@@ -58,7 +58,9 @@ fn test_search_response_creation() {
             content_type: ContentType::Article,
             source: "example.com".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     }];
 
     let options = SearchOptions::default();
@@ -79,7 +81,9 @@ fn test_detect_topics_technology() {
             content_type: ContentType::Documentation,
             source: "github.com".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     }];
     let response = SearchResponse::new("rust".to_string(), results, &SearchOptions::default());
     assert!(

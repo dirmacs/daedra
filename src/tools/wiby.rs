@@ -75,7 +75,9 @@ impl SearchBackend for WibyBackend {
                     content_type: ContentType::Article,
                     source: "wiby".to_string(),
                     favicon: None,
-                    published_date: None, ..Default::default() },
+                    published_date: None,
+                    ..Default::default()
+                },
             })
             .collect();
 

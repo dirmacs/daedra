@@ -111,7 +111,9 @@ impl SearchBackend for WikipediaBackend {
                         content_type: ContentType::Documentation,
                         source: "wikipedia".to_string(),
                         favicon: None,
-                        published_date: None, ..Default::default() },
+                        published_date: None,
+                        ..Default::default()
+                    },
                 });
             }
         }

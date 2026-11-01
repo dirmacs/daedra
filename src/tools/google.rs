@@ -71,7 +71,9 @@ fn extract_google_result(element: &ElementRef) -> Option<SearchResult> {
             content_type: ContentType::Other,
             source: "google".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     })
 }
 

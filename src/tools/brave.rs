@@ -115,7 +115,9 @@ fn extract_brave_result(element: &ElementRef) -> Option<SearchResult> {
             content_type: ContentType::Other,
             source: "brave".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     })
 }
 
@@ -301,7 +303,4 @@ mod tests {
         assert_eq!(results[1].url, "https://docs.rs/tokio");
         assert!(results[1].description.contains("Latest crate docs"));
     }
-
-
-
 }

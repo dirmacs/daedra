@@ -170,7 +170,9 @@ mod cache_tests {
                 content_type: ContentType::Article,
                 source: "example.com".to_string(),
                 favicon: None,
-                published_date: None, ..Default::default() },
+                published_date: None,
+                ..Default::default()
+            },
         }];
 
         let options = SearchOptions::default();
@@ -190,7 +192,9 @@ mod cache_tests {
             .await;
 
         // Now it should be cached
-        let cached = cache.get_search("test query", "wt-wt", "MODERATE", "*").await;
+        let cached = cache
+            .get_search("test query", "wt-wt", "MODERATE", "*")
+            .await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().data.len(), 1);
     }

@@ -51,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
-            &scope, response.clone(),
+            &scope,
+            response.clone(),
         )
         .await;
 
@@ -142,7 +143,8 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
-            &scope, response,
+            &scope,
+            response,
         )
         .await;
 

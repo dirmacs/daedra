@@ -58,7 +58,9 @@ fn abstract_to_result(data: &DdgResponse) -> Option<SearchResult> {
             content_type: ContentType::Documentation,
             source: "ddg-instant".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     })
 }
 
@@ -89,7 +91,9 @@ fn topic_to_result(topic: &serde_json::Value) -> Option<SearchResult> {
             content_type: ContentType::Documentation,
             source: "ddg-instant".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     })
 }
 

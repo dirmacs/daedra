@@ -149,7 +149,9 @@ fn test_search_result(url: &str, title: &str) -> crate::types::SearchResult {
             content_type: ContentType::Other,
             source: "test".to_string(),
             favicon: None,
-            published_date: None, ..Default::default() },
+            published_date: None,
+            ..Default::default()
+        },
     }
 }
 
@@ -293,7 +295,8 @@ fn test_merge_surfaces_corroboration_count() {
         .find(|r| r.url.contains("tokio.rs"))
         .expect("corroborated tokio.rs result present");
     assert_eq!(
-        consensus.metadata.corroborated_by, Some(3),
+        consensus.metadata.corroborated_by,
+        Some(3),
         "three sources returned this page; the count must reach the caller, not just the score"
     );
 
