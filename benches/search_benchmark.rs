@@ -45,6 +45,7 @@ fn bench_cache_operations(c: &mut Criterion) {
                         std::hint::black_box("test query"),
                         std::hint::black_box("wt-wt"),
                         std::hint::black_box("MODERATE"),
+                        std::hint::black_box("*"),
                         std::hint::black_box(response.clone()),
                     )
                     .await;
@@ -57,7 +58,7 @@ fn bench_cache_operations(c: &mut Criterion) {
 
             runtime.block_on(async {
                 cache
-                    .set_search("test query", "wt-wt", "MODERATE", response)
+                    .set_search("test query", "wt-wt", "MODERATE", "*", response)
                     .await;
             });
 
@@ -67,6 +68,7 @@ fn bench_cache_operations(c: &mut Criterion) {
                         std::hint::black_box("test query"),
                         std::hint::black_box("wt-wt"),
                         std::hint::black_box("MODERATE"),
+                        std::hint::black_box("*"),
                     )
                     .await
             });

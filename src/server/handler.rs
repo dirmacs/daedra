@@ -103,6 +103,10 @@ impl DaedraHandler {
     #[instrument(skip(self))]
     pub async fn execute_search(&self, args: SearchArgs) -> DaedraResult<SearchResponse> {
         let options = args.options.clone().unwrap_or_default();
+        let scope = crate::cache::SearchCache::backend_scope(
+            options.backends.as_deref(),
+            options.exclude_backends.as_deref(),
+        );
 
         // Check cache first
         if let Some(cached) = self
@@ -111,6 +115,7 @@ impl DaedraHandler {
                 &args.query,
                 &options.region,
                 &options.safe_search.to_string(),
+                &scope,
             )
             .await
         {
@@ -129,6 +134,7 @@ impl DaedraHandler {
                 &args.query,
                 &options.region,
                 &options.safe_search.to_string(),
+                &scope,
                 response.clone(),
             )
             .await;

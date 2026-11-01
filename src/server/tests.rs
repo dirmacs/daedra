@@ -287,6 +287,12 @@ async fn test_execute_search_caches_results() {
         options: None,
     };
     let options = args.options.clone().unwrap_or_default();
+    // Must match the scope execute_search derives, or this primes a different
+    // key and the test silently stops exercising the cache-hit path.
+    let scope = crate::cache::SearchCache::backend_scope(
+        options.backends.as_deref(),
+        options.exclude_backends.as_deref(),
+    );
     let cached_response = SearchResponse::new(args.query.clone(), vec![], &options);
     handler
         .cache()
@@ -294,6 +300,7 @@ async fn test_execute_search_caches_results() {
             &args.query,
             &options.region,
             &options.safe_search.to_string(),
+            &scope,
             cached_response.clone(),
         )
         .await;

@@ -179,18 +179,18 @@ mod cache_tests {
         // Initially not cached
         assert!(
             cache
-                .get_search("test query", "wt-wt", "MODERATE")
+                .get_search("test query", "wt-wt", "MODERATE", "*")
                 .await
                 .is_none()
         );
 
         // Cache it
         cache
-            .set_search("test query", "wt-wt", "MODERATE", response.clone())
+            .set_search("test query", "wt-wt", "MODERATE", "*", response.clone())
             .await;
 
         // Now it should be cached
-        let cached = cache.get_search("test query", "wt-wt", "MODERATE").await;
+        let cached = cache.get_search("test query", "wt-wt", "MODERATE", "*").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().data.len(), 1);
     }
@@ -206,27 +206,27 @@ mod cache_tests {
         let response2 = SearchResponse::new("query2".to_string(), results.clone(), &options);
 
         cache
-            .set_search("query1", "wt-wt", "MODERATE", response1)
+            .set_search("query1", "wt-wt", "MODERATE", "*", response1)
             .await;
         cache
-            .set_search("query2", "wt-wt", "MODERATE", response2)
+            .set_search("query2", "wt-wt", "MODERATE", "*", response2)
             .await;
 
         assert!(
             cache
-                .get_search("query1", "wt-wt", "MODERATE")
+                .get_search("query1", "wt-wt", "MODERATE", "*")
                 .await
                 .is_some()
         );
         assert!(
             cache
-                .get_search("query2", "wt-wt", "MODERATE")
+                .get_search("query2", "wt-wt", "MODERATE", "*")
                 .await
                 .is_some()
         );
         assert!(
             cache
-                .get_search("query3", "wt-wt", "MODERATE")
+                .get_search("query3", "wt-wt", "MODERATE", "*")
                 .await
                 .is_none()
         );
@@ -241,11 +241,11 @@ mod cache_tests {
         let response = SearchResponse::new("test".to_string(), results, &options);
 
         cache
-            .set_search("test", "wt-wt", "MODERATE", response)
+            .set_search("test", "wt-wt", "MODERATE", "*", response)
             .await;
         assert!(
             cache
-                .get_search("test", "wt-wt", "MODERATE")
+                .get_search("test", "wt-wt", "MODERATE", "*")
                 .await
                 .is_some()
         );
@@ -253,7 +253,7 @@ mod cache_tests {
         cache.clear().await;
         assert!(
             cache
-                .get_search("test", "wt-wt", "MODERATE")
+                .get_search("test", "wt-wt", "MODERATE", "*")
                 .await
                 .is_none()
         );

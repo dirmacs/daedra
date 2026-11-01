@@ -38,13 +38,20 @@ async fn main() -> anyhow::Result<()> {
     println!("Search completed in {:?}", first_duration);
     println!("Results: {}", response.data.len());
 
+    // Backend scope: part of the cache key, because a response carries the
+    // corroboration counts the backends that produced it agreed on.
+    let scope = SearchCache::backend_scope(
+        options.backends.as_deref(),
+        options.exclude_backends.as_deref(),
+    );
+
     // Store in cache
     cache
         .set_search(
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
-            response.clone(),
+            &scope, response.clone(),
         )
         .await;
 
@@ -60,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
+            &scope,
         )
         .await;
 
@@ -96,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
             &different_args.query,
             &different_options.region,
             &different_options.safe_search.to_string(),
+            &scope,
         )
         .await;
 
@@ -116,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
+            &scope,
         )
         .await;
 
@@ -132,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
-            response,
+            &scope, response,
         )
         .await;
 
@@ -141,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
             &search_args.query,
             &options.region,
             &options.safe_search.to_string(),
+            &scope,
         )
         .await;
 

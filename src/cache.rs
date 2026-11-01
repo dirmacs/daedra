@@ -84,9 +84,55 @@ impl SearchCache {
         })
     }
 
-    /// Generate a cache key for search queries
-    fn search_key(query: &str, region: &str, safe_search: &str) -> String {
-        format!("search:{}:{}:{}", query.to_lowercase(), region, safe_search)
+    /// Generate a cache key for search queries.
+    ///
+    /// `backend_scope` identifies WHICH backends the request was allowed to
+    /// use. It matters because a response carries the corroboration counts
+    /// that set produced: asking the same query with `--backend brave` and
+    /// then with no filter must not replay the single-backend answer, whose
+    /// `corroborated_by` would be None or low rather than reflecting the
+    /// multi-source agreement the second call would have observed.
+    ///
+    /// Deliberately the REQUESTED scope, not the live availability set — an
+    /// availability-keyed cache would fragment on every transient circuit
+    /// breaker trip and miss far more often than it should.
+    fn search_key(query: &str, region: &str, safe_search: &str, backend_scope: &str) -> String {
+        format!(
+            "search:{}:{}:{}:{}",
+            query.to_lowercase(),
+            region,
+            safe_search,
+            backend_scope
+        )
+    }
+
+    /// Canonical cache-key component for a request's backend selection.
+    ///
+    /// Sorted so `--backend a --backend b` and `--backend b --backend a` share
+    /// an entry; `*` when no filter is applied, so the default path keys
+    /// stably rather than on an arbitrary ordering.
+    pub fn backend_scope(
+        backends: Option<&[String]>,
+        exclude_backends: Option<&[String]>,
+    ) -> String {
+        let fmt = |xs: Option<&[String]>| -> String {
+            match xs {
+                None => String::new(),
+                Some(v) if v.is_empty() => String::new(),
+                Some(v) => {
+                    let mut s: Vec<&str> = v.iter().map(String::as_str).collect();
+                    s.sort_unstable();
+                    s.join(",")
+                },
+            }
+        };
+        let inc = fmt(backends);
+        let exc = fmt(exclude_backends);
+        if inc.is_empty() && exc.is_empty() {
+            "*".to_string()
+        } else {
+            format!("+{inc}-{exc}")
+        }
     }
 
     /// Generate a cache key for page content
@@ -104,12 +150,13 @@ impl SearchCache {
         query: &str,
         region: &str,
         safe_search: &str,
+        backend_scope: &str,
     ) -> Option<SearchResponse> {
         if !self.enabled {
             return None;
         }
 
-        let key = Self::search_key(query, region, safe_search);
+        let key = Self::search_key(query, region, safe_search, backend_scope);
         let result = self.search_cache.get(&key).await;
 
         if result.is_some() {
@@ -126,13 +173,14 @@ impl SearchCache {
         query: &str,
         region: &str,
         safe_search: &str,
+        backend_scope: &str,
         response: SearchResponse,
     ) {
         if !self.enabled {
             return;
         }
 
-        let key = Self::search_key(query, region, safe_search);
+        let key = Self::search_key(query, region, safe_search, backend_scope);
         self.search_cache.insert(key, response).await;
         debug!(query = %query, "Cached search response");
     }
@@ -238,16 +286,16 @@ mod tests {
         // Initially empty
         assert!(
             cache
-                .get_search("test", "wt-wt", "MODERATE")
+                .get_search("test", "wt-wt", "MODERATE", "*")
                 .await
                 .is_none()
         );
 
         // Set and get
         cache
-            .set_search("test", "wt-wt", "MODERATE", response.clone())
+            .set_search("test", "wt-wt", "MODERATE", "*", response.clone())
             .await;
-        let cached = cache.get_search("test", "wt-wt", "MODERATE").await;
+        let cached = cache.get_search("test", "wt-wt", "MODERATE", "*").await;
         assert!(cached.is_some());
         assert_eq!(cached.unwrap().data.len(), 1);
     }
@@ -287,11 +335,11 @@ mod tests {
         let response = SearchResponse::new("test".to_string(), results, &options);
 
         cache
-            .set_search("test", "wt-wt", "MODERATE", response)
+            .set_search("test", "wt-wt", "MODERATE", "*", response)
             .await;
         assert!(
             cache
-                .get_search("test", "wt-wt", "MODERATE")
+                .get_search("test", "wt-wt", "MODERATE", "*")
                 .await
                 .is_none()
         );
@@ -304,5 +352,48 @@ mod tests {
         assert_eq!(stats.search_entries, 0);
         assert_eq!(stats.page_entries, 0);
         assert!(stats.enabled);
+    }
+}
+
+#[cfg(test)]
+mod backend_scope_tests {
+    use super::SearchCache;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn unscoped_requests_share_a_stable_key() {
+        // The default path must not key on an arbitrary ordering or on None.
+        assert_eq!(SearchCache::backend_scope(None, None), "*");
+        assert_eq!(SearchCache::backend_scope(Some(&[]), Some(&[])), "*");
+    }
+
+    #[test]
+    fn backend_order_does_not_change_the_key() {
+        let a = SearchCache::backend_scope(Some(&v(&["brave", "hn"])), None);
+        let b = SearchCache::backend_scope(Some(&v(&["hn", "brave"])), None);
+        assert_eq!(a, b, "same set in different order must share an entry");
+    }
+
+    #[test]
+    fn different_backend_sets_do_not_collide() {
+        // This is the bug: a single-backend answer must never be replayed for
+        // a query that asked for all backends, because corroborated_by would
+        // report the narrower set's agreement.
+        let single = SearchCache::backend_scope(Some(&v(&["brave"])), None);
+        let all = SearchCache::backend_scope(None, None);
+        assert_ne!(
+            single, all,
+            "a --backend brave answer must not be served for an unfiltered query"
+        );
+    }
+
+    #[test]
+    fn exclusions_are_part_of_the_key() {
+        let none = SearchCache::backend_scope(None, None);
+        let excl = SearchCache::backend_scope(None, Some(&v(&["google"])));
+        assert_ne!(none, excl);
     }
 }
