@@ -92,8 +92,7 @@ impl SearchBackend for StackExchangeBackend {
                         content_type: ContentType::Forum,
                         source: "stackoverflow".to_string(),
                         favicon: None,
-                        published_date: None,
-                    },
+                        published_date: None, ..Default::default() },
                 }
             })
             .take(opts.num_results)

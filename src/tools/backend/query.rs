@@ -413,8 +413,7 @@ mod tests {
                 content_type: crate::types::ContentType::Other,
                 source: "test".to_string(),
                 favicon: None,
-                published_date: None,
-            },
+                published_date: None, ..Default::default() },
         }
     }
 
@@ -589,8 +588,7 @@ mod invariant_tests {
                 content_type: crate::types::ContentType::Other,
                 source: "test".to_string(),
                 favicon: None,
-                published_date: None,
-            },
+                published_date: None, ..Default::default() },
         }
     }
 

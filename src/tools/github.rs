@@ -101,8 +101,7 @@ impl SearchBackend for GitHubBackend {
                         content_type: ContentType::Documentation,
                         source: "github".to_string(),
                         favicon: None,
-                        published_date: None,
-                    },
+                        published_date: None, ..Default::default() },
                 }
             })
             .take(opts.num_results)

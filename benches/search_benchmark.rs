@@ -20,6 +20,7 @@ fn create_test_response(result_count: usize) -> SearchResponse {
                 source: format!("example{}.com", i),
                 favicon: None,
                 published_date: None,
+                ..Default::default()
             },
         })
         .collect();
@@ -119,6 +120,7 @@ fn bench_response_creation(c: &mut Criterion) {
                     source: format!("example{}.com", i),
                     favicon: None,
                     published_date: None,
+                    ..Default::default()
                 },
             })
             .collect();

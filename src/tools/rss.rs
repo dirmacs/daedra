@@ -48,8 +48,7 @@ fn result(
             content_type: ContentType::Other,
             source: source.to_string(),
             favicon: None,
-            published_date: None,
-        },
+            published_date: None, ..Default::default() },
     }
 }
 

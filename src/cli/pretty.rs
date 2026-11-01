@@ -47,19 +47,31 @@ pub(crate) fn format_search_result_pretty(
     index: usize,
     no_color: bool,
 ) -> String {
+    // Surface multi-backend agreement. One engine returning a page is a claim;
+    // several returning it is corroboration, and that is the whole reason the
+    // merge fan-out exists. Printed only when more than one source agreed so
+    // the common single-source case stays uncluttered.
+    let agree = |n: usize| -> String {
+        if n > 1 {
+            format!(" (+{n} sources agree)")
+        } else {
+            String::new()
+        }
+    };
     if no_color {
         format!(
-            "{}. {}\n   URL: {}\n   {}\n   Source: {} | Type: {:?}\n\n",
+            "{}. {}\n   URL: {}\n   {}\n   Source: {}{} | Type: {:?}\n\n",
             index + 1,
             result.title,
             result.url,
             result.description,
             result.metadata.source,
+            agree(result.metadata.corroborated_by),
             result.metadata.content_type
         )
     } else {
         format!(
-            "{} {}\n   {} {}\n   {}\n   {} {} {} {:?}\n\n",
+            "{} {}\n   {} {}\n   {}\n   {} {}{} {} {:?}\n\n",
             format!("{}.", index + 1).bright_black(),
             result.title.white().bold(),
             "URL:".bright_black(),
@@ -67,6 +79,7 @@ pub(crate) fn format_search_result_pretty(
             result.description.bright_white(),
             "Source:".bright_black(),
             result.metadata.source.yellow(),
+            agree(result.metadata.corroborated_by).green(),
             "|".bright_black(),
             result.metadata.content_type
         )
