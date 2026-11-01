@@ -32,24 +32,75 @@
 //!
 //! [`PageContent`]: crate::types::PageContent
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use regex::Regex;
 use std::sync::OnceLock;
 
+/// Which surface an address came from, ordered by confidence.
+///
+/// The three sources are not equally trustworthy, and downstream assessment
+/// needs the distinction: a `mailto:` was authored deliberately as a contact
+/// channel, body text can carry an address in passing, and structured data sits
+/// between the two — published on purpose, but usually invisible to a human
+/// reading the rendered page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Source {
+    /// A `mailto:` link target — authored as a contact link.
+    Mailto,
+    /// schema.org structured data (`application/ld+json`), typically a
+    /// `contactPoint.email` that never appears in visible markup.
+    JsonLd,
+    /// Address text in the rendered body.
+    BodyText,
+}
+
 /// One surviving address, with the source it was found in.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
     /// Lowercased address, as it should be stored.
     pub address: String,
+    /// Which surface produced it; lower is higher confidence.
+    pub source: Source,
 }
 
 impl Found {
-    fn new(address: impl Into<String>) -> Self {
+    fn new(address: impl Into<String>, source: Source) -> Self {
         Self {
             address: address.into().to_lowercase(),
+            source,
         }
     }
+}
+
+impl PartialOrd for Found {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Found {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.address
+            .cmp(&other.address)
+            .then(self.source.cmp(&other.source))
+    }
+}
+
+/// Keep the most confident source when one address is seen more than once.
+fn merge_into(seen: &mut BTreeMap<String, Source>, address: String, source: Source) {
+    match seen.get(&address) {
+        Some(existing) if *existing <= source => {},
+        _ => {
+            seen.insert(address, source);
+        },
+    }
+}
+
+fn finish(seen: BTreeMap<String, Source>) -> Vec<Found> {
+    seen.into_iter()
+        .map(|(address, source)| Found { address, source })
+        .collect()
 }
 
 /// Image/video/archive extensions that appear in `name@2x.ext` filenames.
@@ -124,6 +175,22 @@ fn address_regex() -> &'static Regex {
 fn mailto_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r#"(?i)mailto:([^"'?>\s]+)"#).expect("mailto regex is valid"))
+}
+
+/// Matches an `application/ld+json` script block, capturing its body.
+///
+/// This is the only place a schema.org `contactPoint.email` can be found.
+/// Mainmatter publishes `info@mainmatter.com` exactly here and nowhere in
+/// visible markup, so every text-based extractor — and every human reading the
+/// rendered page — misses it.
+fn ld_json_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>"#,
+        )
+        .expect("ld+json regex is valid")
+    })
 }
 
 /// Resolve a run of candidates, dropping a glued-label variant when the
@@ -245,7 +312,7 @@ pub fn extract_from_text(text: &str) -> Vec<Found> {
     }
     drop_glued_variants(raw)
         .into_iter()
-        .map(Found::new)
+        .map(|a| Found::new(a, Source::BodyText))
         .collect()
 }
 
@@ -272,23 +339,82 @@ pub fn extract_from_html(html: &str) -> Vec<Found> {
     }
     drop_glued_variants(raw)
         .into_iter()
-        .map(Found::new)
+        .map(|a| Found::new(a, Source::Mailto))
         .collect()
 }
 
-/// Extract from both sources and merge, `mailto:` targets winning.
+/// Extract addresses published in schema.org structured data.
 ///
-/// Deduplicated across sources, so an address that appears both as a link and
-/// in body text is returned once.
+/// Walks every `application/ld+json` block and collects any value under a key
+/// named `email`, plus any address-shaped string in a `contactPoint`. This is
+/// the only surface on which some sites publish a contact address at all:
+/// mainmatter.com carries `info@mainmatter.com` at
+/// `@graph[0].contactPoint[1].email` and nowhere in visible markup.
+///
+/// Parsing is best-effort and non-fatal. Real pages carry `@graph` arrays,
+/// nested `Organization`→`contactPoint` lists, and occasionally trailing commas
+/// that strict JSON rejects. A block that fails to parse is skipped rather than
+/// failing the page, because structured data is a bonus surface — losing it must
+/// not cost the caller the `mailto:` and body-text passes.
+pub fn extract_from_json_ld(html: &str) -> Vec<Found> {
+    let mut found: BTreeSet<String> = BTreeSet::new();
+    for cap in ld_json_regex().captures_iter(html) {
+        let Some(body) = cap.get(1) else { continue };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(body.as_str().trim()) else {
+            continue;
+        };
+        collect_json_ld_emails(&value, &mut found);
+    }
+    found
+        .into_iter()
+        .map(|a| Found::new(a, Source::JsonLd))
+        .collect()
+}
+
+/// Recursively collect `email` values from a JSON-LD document.
+fn collect_json_ld_emails(value: &serde_json::Value, out: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if key.eq_ignore_ascii_case("email")
+                    && let Some(s) = child.as_str()
+                {
+                    // schema.org allows `mailto:` prefixes on this field.
+                    let bare = s.trim().trim_start_matches("mailto:").trim();
+                    let candidate = bare.to_lowercase();
+                    if candidate.contains('@') && reject_reason(&candidate).is_none() {
+                        out.insert(candidate);
+                    }
+                }
+                collect_json_ld_emails(child, out);
+            }
+        },
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_ld_emails(item, out);
+            }
+        },
+        _ => {},
+    }
+}
+
+/// Extract from every surface and merge, most confident source winning.
+///
+/// Deduplicated across sources: an address that appears both as a link and in
+/// body text is returned once, with [`Source::Mailto`].
 pub fn extract_all(html: Option<&str>, text: &str) -> Vec<Found> {
-    let mut out: BTreeSet<Found> = BTreeSet::new();
-    for f in extract_from_html(html.unwrap_or_default()) {
-        out.insert(f);
+    let mut seen: BTreeMap<String, Source> = BTreeMap::new();
+    let html = html.unwrap_or_default();
+    for f in extract_from_html(html) {
+        merge_into(&mut seen, f.address, f.source);
+    }
+    for f in extract_from_json_ld(html) {
+        merge_into(&mut seen, f.address, f.source);
     }
     for f in extract_from_text(text) {
-        out.insert(f);
+        merge_into(&mut seen, f.address, f.source);
     }
-    out.into_iter().collect()
+    finish(seen)
 }
 
 #[cfg(test)]
@@ -452,5 +578,82 @@ mod tests {
             "build@dirmacs.com ... BUILD@dirmacs.com ... build@dirmacs.com",
         ));
         assert_eq!(got, vec!["build@dirmacs.com"]);
+    }
+
+    #[test]
+    fn finds_address_only_in_json_ld() {
+        // The real mainmatter.com shape: `info@mainmatter.com` appears at
+        // `@graph[0].contactPoint[1].email` and nowhere in visible markup.
+        // A text-only extractor cannot reach it.
+        let html = r#"<html><head>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"Organization","name":"Mainmatter",
+"contactPoint":[{"@type":"ContactPoint","contactType":"sales","email":"other@mainmatter.com"},
+{"@type":"ContactPoint","contactType":"general","email":"info@mainmatter.com"}]}]}
+</script></head><body><p>No address here.</p></body></html>"#;
+        let got = addrs(extract_from_json_ld(html));
+        assert_eq!(got, vec!["info@mainmatter.com", "other@mainmatter.com"]);
+        // And the merged pass picks it up even though body text has none.
+        let merged = extract_all(Some(html), "No address here.");
+        assert_eq!(
+            addrs(merged),
+            vec!["info@mainmatter.com", "other@mainmatter.com"]
+        );
+    }
+
+    #[test]
+    fn json_ld_tolerates_a_mailto_prefix() {
+        // schema.org permits `"email": "mailto:x@y.z"`.
+        let html = r#"<script type="application/ld+json">
+{"@type":"Organization","email":"mailto:hello@acme.com"}
+</script>"#;
+        assert_eq!(addrs(extract_from_json_ld(html)), vec!["hello@acme.com"]);
+    }
+
+    #[test]
+    fn json_ld_bad_block_does_not_lose_other_sources() {
+        // A malformed block must be skipped, not fatal: structured data is a
+        // bonus surface and losing it must not cost the mailto pass.
+        let html = r#"<script type="application/ld+json">{not json,}</script>
+<a href="mailto:build@dirmacs.com">Email</a>"#;
+        let merged = extract_all(Some(html), "");
+        assert_eq!(addrs(merged), vec!["build@dirmacs.com"]);
+    }
+
+    #[test]
+    fn json_ld_placeholder_is_still_rejected() {
+        // The filters apply on every surface; a placeholder in structured data
+        // is no more sendable than one in body text.
+        let html = r#"<script type="application/ld+json">
+{"@type":"Organization","email":"alice@example.com"}
+</script>"#;
+        assert!(addrs(extract_from_json_ld(html)).is_empty());
+    }
+
+    #[test]
+    fn most_confident_source_wins_when_an_address_repeats() {
+        // Same address as a mailto and in body text: keep the mailto sighting,
+        // and return it once.
+        let html = r#"<a href="mailto:build@dirmacs.com">Email</a>"#;
+        let merged = extract_all(Some(html), "or write to build@dirmacs.com");
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].address, "build@dirmacs.com");
+        assert_eq!(merged[0].source, Source::Mailto);
+    }
+
+    #[test]
+    fn source_ranking_prefers_mailto_then_json_ld_then_body() {
+        assert!(Source::Mailto < Source::JsonLd);
+        assert!(Source::JsonLd < Source::BodyText);
+    }
+
+    #[test]
+    fn json_ld_is_confident_but_not_body_text() {
+        let html = r#"<script type="application/ld+json">
+{"@type":"Organization","email":"info@acme.com"}
+</script>"#;
+        let merged = extract_all(Some(html), "");
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].source, Source::JsonLd);
     }
 }
