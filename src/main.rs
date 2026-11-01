@@ -236,9 +236,43 @@ Testing search functionality..."
 
     #[test]
     fn test_print_search_header_pretty_no_color() {
-        let output = format_search_header_pretty("rust lang", 5, "wt-wt", true);
+        let output = format_search_header_pretty("rust lang", 5, "wt-wt", &[], true);
         assert!(output.contains("Search Results for: rust lang"));
         assert!(output.contains("Found 5 results in region 'wt-wt'"));
+    }
+
+    /// A dropped constraint must be visible in the default output format.
+    ///
+    /// The search path relaxes any constraint that would eliminate every
+    /// result and reports it in `metadata.relaxed_constraints`. JSON callers
+    /// read that field, but `pretty` is the default, and before this test it
+    /// printed nothing: `site:github.com tokio async runtime` returned
+    /// tokio.rs and stackoverflow.com with no hint that `site:` had been
+    /// ignored. The assertion is on the notice specifically, so a header that
+    /// merely still says "Found N results" cannot pass it.
+    #[test]
+    fn test_relaxed_constraint_is_visible_in_pretty() {
+        let relaxed = vec!["site:github.com".to_string()];
+        let output = format_search_header_pretty("tokio async", 10, "wt-wt", &relaxed, true);
+        assert!(
+            output.contains("site:github.com"),
+            "dropped constraint must be named, got: {output}"
+        );
+        assert!(
+            output.contains("not applied"),
+            "notice must say the constraint did not apply, got: {output}"
+        );
+    }
+
+    /// The notice must not appear when nothing was relaxed, or every ordinary
+    /// search gains a spurious warning and readers learn to ignore it.
+    #[test]
+    fn test_no_relaxed_constraint_prints_no_notice() {
+        let output = format_search_header_pretty("tokio async", 10, "wt-wt", &[], true);
+        assert!(
+            !output.contains("not applied"),
+            "no constraint was dropped, so no notice should print; got: {output}"
+        );
     }
 
     #[test]
