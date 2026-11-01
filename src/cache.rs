@@ -313,6 +313,7 @@ mod tests {
             word_count: 2,
             content_type: None,
             links: None,
+            emails: None,
         };
 
         // Initially empty

@@ -270,6 +270,17 @@ impl FetchClient {
             None
         };
 
+        // Raw HTML is only in scope here — `is_skippable_href` strips `mailto:`
+        // from `links` and the document is dropped once this returns — so this
+        // is the one place a `mailto:` target can still be recovered. Body text
+        // comes from the rendered Markdown, which is what a reader sees.
+        let found = crate::tools::email::extract_all(Some(html), &content);
+        let emails = if found.is_empty() {
+            None
+        } else {
+            Some(found.into_iter().map(|f| f.address).collect())
+        };
+
         info!(
             url = %url,
             title = %title,
@@ -285,6 +296,7 @@ impl FetchClient {
             word_count,
             content_type: Some("html".to_string()),
             links,
+            emails,
         })
     }
 
@@ -292,6 +304,9 @@ impl FetchClient {
         let content = text.trim().to_string();
         let word_count = word_count(&content);
         let title = title_from_url(url);
+        // No HTML to scan, but PDFs carry contact blocks in their text.
+        // Computed before `content` moves into the struct.
+        let emails = emails_from_text(&content);
 
         info!(
             url = %url,
@@ -308,6 +323,7 @@ impl FetchClient {
             word_count,
             content_type: Some("pdf".to_string()),
             links: None,
+            emails,
         }
     }
 
@@ -334,6 +350,7 @@ impl FetchClient {
             word_count,
             content_type: Some(mime.to_string()),
             links: None,
+            emails: emails_from_text(trimmed),
         }
     }
 
@@ -360,6 +377,7 @@ impl FetchClient {
             word_count,
             content_type: Some(mime.to_string()),
             links: None,
+            emails: emails_from_text(trimmed),
         }
     }
 
@@ -572,6 +590,21 @@ impl FetchClient {
 impl Default for FetchClient {
     fn default() -> Self {
         Self::new().expect("Failed to create default fetch client")
+    }
+}
+
+/// Extract addresses from plain text, returning `None` when there are none.
+///
+/// Shared by the non-HTML page builders (PDF, document, plain text). Those have
+/// no `mailto:` targets to scan, but their text frequently carries a contact
+/// block, so the text pass still applies. Absent rather than empty so callers
+/// can distinguish "no addresses" from "not inspected".
+pub(super) fn emails_from_text(text: &str) -> Option<Vec<String>> {
+    let found = crate::tools::email::extract_from_text(text);
+    if found.is_empty() {
+        None
+    } else {
+        Some(found.into_iter().map(|f| f.address).collect())
     }
 }
 

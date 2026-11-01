@@ -22,22 +22,53 @@ pub(crate) fn format_search_header_pretty(
     query: &str,
     count: usize,
     region: &str,
+    relaxed: &[String],
     no_color: bool,
 ) -> String {
+    // A relaxed constraint is a silent wrong answer unless it is printed. The
+    // search path drops any constraint that would eliminate every result and
+    // reports it in `metadata.relaxed_constraints`, which JSON callers read —
+    // but `pretty` is the DEFAULT format, so an agent asking for
+    // `site:github.com` and receiving tokio.rs had no way to learn its filter
+    // had been ignored. Printed before the results, because a reader who stops
+    // at the first result has still seen it.
+    let warning = format_relaxed_warning(relaxed, no_color);
     if no_color {
         format!(
-            "\nSearch Results for: {}\n{}\nFound {} results in region '{}'\n\n",
+            "\nSearch Results for: {}\n{}\nFound {} results in region '{}'\n{}\n",
             query,
             "=".repeat(50),
             count,
-            region
+            region,
+            warning
         )
     } else {
         format!(
-            "{}\nFound {} results in region '{}'\n\n",
+            "{}\nFound {} results in region '{}'\n{}\n",
             format_section(&format!("Search Results for: {}", query.cyan())),
             count.to_string().green(),
-            region.bright_blue()
+            region.bright_blue(),
+            warning
+        )
+    }
+}
+
+/// Render the dropped-constraint notice, or nothing when none were dropped.
+fn format_relaxed_warning(relaxed: &[String], no_color: bool) -> String {
+    if relaxed.is_empty() {
+        return String::new();
+    }
+    let joined = relaxed.join(", ");
+    if no_color {
+        format!(
+            "NOTE: constraint(s) not applied — no result satisfied {joined}. \
+             Results below are UNSCOPED.\n"
+        )
+    } else {
+        format!(
+            "{} {joined}. Results below are {}.\n",
+            "NOTE: constraint(s) not applied — no result satisfied".yellow(),
+            "UNSCOPED".yellow().bold()
         )
     }
 }
@@ -124,10 +155,16 @@ pub(crate) fn format_page_content_pretty(content: &PageContent, no_color: bool) 
     out
 }
 
-pub(crate) fn print_search_header_pretty(query: &str, count: usize, region: &str, no_color: bool) {
+pub(crate) fn print_search_header_pretty(
+    query: &str,
+    count: usize,
+    region: &str,
+    relaxed: &[String],
+    no_color: bool,
+) {
     print!(
         "{}",
-        format_search_header_pretty(query, count, region, no_color)
+        format_search_header_pretty(query, count, region, relaxed, no_color)
     );
 }
 

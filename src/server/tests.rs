@@ -598,11 +598,16 @@ fn test_format_page_result() {
         word_count: 2,
         content_type: None,
         links: None,
+        emails: Some(vec![
+            "build@dirmacs.com".to_string(),
+            "hi@corrode.dev".to_string(),
+        ]),
     };
     let formatted = format_page_result(&content);
-    assert!(formatted.contains("Example"));
-    assert!(formatted.contains("https://example.com"));
-    assert!(formatted.contains("**Words:** 2"));
+    assert!(
+        formatted.contains("**Emails:** build@dirmacs.com, hi@corrode.dev"),
+        "addresses must be visible to an MCP visit_page caller: {formatted}"
+    );
     assert!(formatted.contains("Hello world"));
 }
 

@@ -30,6 +30,16 @@ pub struct PageContent {
     /// Links found on the page
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<PageLink>>,
+
+    /// Contact addresses found on the page, sorted and deduplicated.
+    ///
+    /// Harvested from `mailto:` targets in the raw HTML *and* from address
+    /// text in the rendered Markdown. Present only when at least one address
+    /// survived the false-positive filters in [`crate::tools::email`]; absent
+    /// rather than an empty list, so a caller can tell "no addresses" from
+    /// "not looked at" without a flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emails: Option<Vec<String>>,
 }
 
 /// A link found on a page

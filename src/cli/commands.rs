@@ -203,6 +203,7 @@ pub(crate) fn print_search(
                 query,
                 response.data.len(),
                 &response.metadata.search_context.region,
+                &response.metadata.relaxed_constraints,
                 no_color,
             );
             for (i, result) in response.data.iter().enumerate() {

@@ -11,6 +11,7 @@ pub mod bing;
 pub mod brave;
 pub mod crawl;
 pub mod ddg_instant;
+pub mod email;
 pub mod fetch;
 pub mod github;
 pub mod google;
