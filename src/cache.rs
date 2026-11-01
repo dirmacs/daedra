@@ -117,13 +117,12 @@ impl SearchCache {
     ) -> String {
         let fmt = |xs: Option<&[String]>| -> String {
             match xs {
-                None => String::new(),
-                Some(v) if v.is_empty() => String::new(),
-                Some(v) => {
+                Some(v) if !v.is_empty() => {
                     let mut s: Vec<&str> = v.iter().map(String::as_str).collect();
                     s.sort_unstable();
                     s.join(",")
                 },
+                _ => String::new(),
             }
         };
         let inc = fmt(backends);
