@@ -98,16 +98,27 @@ pub(super) fn tool_success_response(id: Option<Value>, text: String) -> JsonRpcR
 }
 
 pub(super) fn format_page_result(content: &PageContent) -> String {
+    // `emails` must be rendered here, not only carried on the JSON surface.
+    // An agent reaching daedra over MCP `visit_page` reads this text and
+    // nothing else, so omitting the field made extraction invisible on the
+    // one path an agent actually uses — which is the exact failure the
+    // extractor exists to prevent, since the caller would then run its own
+    // regex and reintroduce the glue bug.
+    let emails = match content.emails.as_ref() {
+        Some(list) if !list.is_empty() => format!("**Emails:** {}", list.join(", ")),
+        _ => "**Emails:** (none found)".to_string(),
+    };
     format!(
         "# {}
 
 **URL:** {}
 **Fetched:** {}
 **Words:** {}
+{}
 
 ---
 
 {}",
-        content.title, content.url, content.timestamp, content.word_count, content.content
+        content.title, content.url, content.timestamp, content.word_count, emails, content.content
     )
 }
