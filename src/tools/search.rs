@@ -259,6 +259,7 @@ pub(crate) fn extract_result_from_element(element: &ElementRef) -> Option<Search
             source,
             favicon: None,
             published_date: None,
+            ..Default::default()
         },
     })
 }

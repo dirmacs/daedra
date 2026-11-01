@@ -76,6 +76,7 @@ impl SearchBackend for WibyBackend {
                     source: "wiby".to_string(),
                     favicon: None,
                     published_date: None,
+                    ..Default::default()
                 },
             })
             .collect();

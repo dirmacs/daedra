@@ -41,6 +41,35 @@ pub struct ResultMetadata {
     /// Published date if available
     #[serde(skip_serializing_if = "Option::is_none")]
     pub published_date: Option<String>,
+
+    /// How many independent backends returned this URL.
+    ///
+    /// Agreement is the strongest signal a multi-backend search has: one
+    /// engine returning a page is a claim, several returning it is
+    /// corroboration. The merge already boosts a result's ranking for it, but
+    /// the count was never surfaced, so a caller could not tell a
+    /// consensus hit from a single-source one.
+    ///
+    /// `None` means "no corroboration information" — a result that did not
+    /// pass through the multi-source merge (single-backend calls, fetches).
+    /// It is omitted from JSON entirely, so a consumer deserialising an older
+    /// payload, or one using `deny_unknown_fields`, is unaffected by this
+    /// field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corroborated_by: Option<u32>,
+}
+
+impl Default for ResultMetadata {
+    /// A freshly-produced result from a single backend: no agreement yet.
+    fn default() -> Self {
+        Self {
+            content_type: ContentType::Other,
+            source: String::new(),
+            favicon: None,
+            published_date: None,
+            corroborated_by: None,
+        }
+    }
 }
 
 /// A single search result

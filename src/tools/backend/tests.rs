@@ -150,6 +150,7 @@ fn test_search_result(url: &str, title: &str) -> crate::types::SearchResult {
             source: "test".to_string(),
             favicon: None,
             published_date: None,
+            ..Default::default()
         },
     }
 }
@@ -270,6 +271,43 @@ fn test_merge_corroboration_boost() {
     );
     // The www/utm variant is deduped by canonical key.
     assert_eq!(merged.len(), 2);
+}
+
+#[test]
+fn test_merge_surfaces_corroboration_count() {
+    // The boost changes ranking; this asserts the COUNT reaches the caller.
+    // Without it a caller cannot tell a three-engine consensus from a single
+    // hit, which is the entire point of fanning out.
+    let dup_a = test_search_result("https://tokio.rs/", "Tokio runtime");
+    let dup_b = test_search_result("https://www.tokio.rs/?utm_source=x", "Tokio runtime");
+    let dup_c = test_search_result("https://tokio.rs", "Tokio runtime");
+    let solo = test_search_result("https://solo.test/tokio", "Tokio runtime guide");
+    let by_source = vec![
+        ("a".to_string(), vec![solo]),
+        ("b".to_string(), vec![dup_a]),
+        ("c".to_string(), vec![dup_b]),
+        ("d".to_string(), vec![dup_c]),
+    ];
+    let merged = SearchProvider::merge_ranked_results(&by_source, "tokio runtime", 10);
+
+    let consensus = merged
+        .iter()
+        .find(|r| r.url.contains("tokio.rs"))
+        .expect("corroborated tokio.rs result present");
+    assert_eq!(
+        consensus.metadata.corroborated_by,
+        Some(3),
+        "three sources returned this page; the count must reach the caller, not just the score"
+    );
+
+    let single = merged
+        .iter()
+        .find(|r| r.url.contains("solo.test"))
+        .expect("single-source result present");
+    assert_eq!(
+        single.metadata.corroborated_by, None,
+        "a single-source result must carry no corroboration claim"
+    );
 }
 
 #[test]

@@ -102,6 +102,7 @@ impl SearchBackend for GitHubBackend {
                         source: "github".to_string(),
                         favicon: None,
                         published_date: None,
+                        ..Default::default()
                     },
                 }
             })

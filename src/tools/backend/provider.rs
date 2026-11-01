@@ -689,7 +689,14 @@ cuit_note}",
                         // beyond the first, capped at +0.7.
                         if let Some(key) = canonical_url_key(&r.url) {
                             let agreeing = corroboration.get(&key).copied().unwrap_or(1);
+                            let mut r = r.clone();
+                            if agreeing > 1 {
+                                // Surface the agreement so a caller can tell a
+                                // consensus result from a single-source one.
+                                r.metadata.corroborated_by = Some(agreeing as u32);
+                            }
                             s += 0.35 * (agreeing.saturating_sub(1)).min(2) as f64;
+                            return (s, r);
                         }
                         (s, r.clone())
                     })

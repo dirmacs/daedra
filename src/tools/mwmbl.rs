@@ -112,6 +112,7 @@ impl SearchBackend for MwmblBackend {
                     source: "mwmbl".to_string(),
                     favicon: None,
                     published_date: None,
+                    ..Default::default()
                 },
             })
             .collect();

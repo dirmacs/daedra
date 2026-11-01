@@ -259,6 +259,26 @@ jobs:
           cargo-tarpaulin --version | grep -qx "tarpaulin ${TARPAULIN_VERSION}"
           cargo-crap --version | grep -qx "cargo-crap ${CRAP_VERSION}"
 
+      - name: lock file must be in sync (tarpaulin's --locked does not enforce it)
+        # `cargo tarpaulin --locked` silently ignores the flag: measured on
+        # tarpaulin 0.37.5, a crate whose manifest says 0.2.0 and whose lock
+        # says 0.1.0 exits **0** and REWRITES the lock to 0.2.0, where
+        # `cargo test --locked` exits 101 on the same drift. Relying on the
+        # flag inside the coverage command therefore gates nothing.
+        #
+        # Two independent checks, because they catch different things:
+        #   1. `cargo metadata --locked` exits non-zero when the lock cannot
+        #      satisfy the manifest -- cheap, no build, and it cannot be
+        #      silently tolerated the way tarpaulin tolerates it.
+        #   2. a checksum of the lock before the coverage run, compared after,
+        #      so a rewrite by tarpaulin itself is caught rather than quietly
+        #      folded into the coverage number.
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 >/dev/null
+          echo "lock satisfies the manifest"
+          sha256sum Cargo.lock > "$RUNNER_TEMP/lock.before"
+
       - name: coverage gate (tarpaulin, llvm engine)
         # One instrumented run does two jobs: tarpaulin exits non-zero on any
         # test failure (so this run IS the test run) and its LCOV feeds the
@@ -280,6 +300,16 @@ jobs:
           cargo tarpaulin --engine Llvm --all-features --locked
           --out Lcov --fail-under "$COVERAGE_FLOOR" --timeout 300
           -- --skip integration
+
+      - name: the coverage run must not have rewritten the lock
+        # Guards the second half of dirmacs/daedra#41: tarpaulin exits 0 even
+        # when it prints `ERROR ... parser failure` and the run did not measure
+        # what it claims. A green exit code from this tool is not evidence the
+        # lock was respected, so compare the bytes instead of trusting it.
+        run: |
+          set -euo pipefail
+          sha256sum -c "$RUNNER_TEMP/lock.before"
+          echo "coverage run left Cargo.lock byte-identical"
 
       - name: CRAP gate (fed by this run's coverage)
         # cargo-crap never runs tests; it scores CRAP(m) = CC^2*(1-cov)^3 + CC

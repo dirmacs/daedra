@@ -52,6 +52,7 @@ fn extract_bing_result(element: &ElementRef) -> Option<SearchResult> {
             source: "bing".to_string(),
             favicon: None,
             published_date: None,
+            ..Default::default()
         },
     })
 }

@@ -93,6 +93,7 @@ impl SearchBackend for StackExchangeBackend {
                         source: "stackoverflow".to_string(),
                         favicon: None,
                         published_date: None,
+                        ..Default::default()
                     },
                 }
             })

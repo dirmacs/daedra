@@ -49,6 +49,7 @@ fn result(
             source: source.to_string(),
             favicon: None,
             published_date: None,
+            ..Default::default()
         },
     }
 }

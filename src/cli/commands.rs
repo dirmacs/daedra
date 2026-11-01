@@ -156,8 +156,17 @@ pub(super) async fn run_search(
 
     let cache =
         daedra::cache::SearchCache::new(build_cache_config(globals.no_cache, globals.cache_ttl));
+    let scope = daedra::cache::SearchCache::backend_scope(
+        opts.backends.as_deref(),
+        opts.exclude_backends.as_deref(),
+    );
     if let Some(cached) = cache
-        .get_search(&query, &opts.region, &format!("{:?}", opts.safe_search))
+        .get_search(
+            &query,
+            &opts.region,
+            &format!("{:?}", opts.safe_search),
+            &scope,
+        )
         .await
     {
         return print_search(&query, cached, format, no_color);
@@ -170,6 +179,7 @@ pub(super) async fn run_search(
             &query,
             &opts.region,
             &format!("{:?}", opts.safe_search),
+            &scope,
             response.clone(),
         )
         .await;

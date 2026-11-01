@@ -83,6 +83,7 @@ mod helpers {
                 source: "example.com".to_string(),
                 favicon: None,
                 published_date: None,
+                ..Default::default()
             },
         }
     }

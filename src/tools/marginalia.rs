@@ -133,6 +133,7 @@ impl SearchBackend for MarginaliaBackend {
                     source: "marginalia".to_string(),
                     favicon: None,
                     published_date: None,
+                    ..Default::default()
                 },
             })
             .collect();
