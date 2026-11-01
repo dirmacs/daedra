@@ -51,11 +51,10 @@ pub(crate) fn format_search_result_pretty(
     // several returning it is corroboration, and that is the whole reason the
     // merge fan-out exists. Printed only when more than one source agreed so
     // the common single-source case stays uncluttered.
-    let agree = |n: usize| -> String {
-        if n > 1 {
-            format!(" (+{n} sources agree)")
-        } else {
-            String::new()
+    let agree = |n: Option<u32>| -> String {
+        match n {
+            Some(n) if n > 1 => format!(" (+{n} sources agree)"),
+            _ => String::new(),
         }
     };
     if no_color {

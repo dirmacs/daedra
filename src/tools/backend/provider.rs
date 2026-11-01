@@ -693,7 +693,7 @@ cuit_note}",
                             if agreeing > 1 {
                                 // Surface the agreement so a caller can tell a
                                 // consensus result from a single-source one.
-                                r.metadata.corroborated_by = agreeing;
+                                r.metadata.corroborated_by = Some(agreeing as u32);
                             }
                             s += 0.35 * (agreeing.saturating_sub(1)).min(2) as f64;
                             return (s, r);

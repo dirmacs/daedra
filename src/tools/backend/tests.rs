@@ -293,7 +293,7 @@ fn test_merge_surfaces_corroboration_count() {
         .find(|r| r.url.contains("tokio.rs"))
         .expect("corroborated tokio.rs result present");
     assert_eq!(
-        consensus.metadata.corroborated_by, 3,
+        consensus.metadata.corroborated_by, Some(3),
         "three sources returned this page; the count must reach the caller, not just the score"
     );
 
@@ -302,8 +302,8 @@ fn test_merge_surfaces_corroboration_count() {
         .find(|r| r.url.contains("solo.test"))
         .expect("single-source result present");
     assert_eq!(
-        single.metadata.corroborated_by, 1,
-        "a single-source result must not claim corroboration"
+        single.metadata.corroborated_by, None,
+        "a single-source result must carry no corroboration claim"
     );
 }
 

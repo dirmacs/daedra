@@ -151,3 +151,45 @@ fn test_page_content_serialize_deserialize() {
             .map(|l| l.url.as_str())
     );
 }
+
+#[test]
+fn corroborated_by_is_absent_from_json_when_none() {
+    // A consumer deserialising this payload — including one using
+    // deny_unknown_fields — must not see a field it does not know about.
+    let r = SearchResult {
+        title: "t".into(),
+        url: "https://example.test".into(),
+        description: "d".into(),
+        metadata: ResultMetadata::default(),
+    };
+    let json = serde_json::to_string(&r).unwrap();
+    assert!(
+        !json.contains("corroborated_by"),
+        "None must be omitted entirely, got: {json}"
+    );
+}
+
+#[test]
+fn corroborated_by_round_trips_when_present() {
+    let mut r = SearchResult {
+        title: "t".into(),
+        url: "https://example.test".into(),
+        description: "d".into(),
+        metadata: ResultMetadata::default(),
+    };
+    r.metadata.corroborated_by = Some(3);
+    let json = serde_json::to_string(&r).unwrap();
+    assert!(json.contains("\"corroborated_by\":3"), "got: {json}");
+    let back: SearchResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.metadata.corroborated_by, Some(3));
+}
+
+#[test]
+fn older_payload_without_the_field_still_deserializes() {
+    // Forward-compatibility in the other direction: a payload produced before
+    // this field existed must still load.
+    let json = r#"{"title":"t","url":"https://x","description":"d",
+        "metadata":{"type":"other","source":"s"}}"#;
+    let back: SearchResult = serde_json::from_str(json).expect("old payload must still parse");
+    assert_eq!(back.metadata.corroborated_by, None);
+}

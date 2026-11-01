@@ -48,19 +48,15 @@ pub struct ResultMetadata {
     /// engine returning a page is a claim, several returning it is
     /// corroboration. The merge already boosts a result's ranking for it, but
     /// the count was never surfaced, so a caller could not tell a
-    /// consensus hit from a single-source one. Defaults to 1 for results that
-    /// never went through the merge (single-backend calls, fetches).
-    #[serde(default = "one", skip_serializing_if = "is_one")]
-    pub corroborated_by: usize,
-}
-
-/// Default corroboration for a result that did not pass through the merge.
-fn one() -> usize {
-    1
-}
-
-fn is_one(n: &usize) -> bool {
-    *n <= 1
+    /// consensus hit from a single-source one.
+    ///
+    /// `None` means "no corroboration information" — a result that did not
+    /// pass through the multi-source merge (single-backend calls, fetches).
+    /// It is omitted from JSON entirely, so a consumer deserialising an older
+    /// payload, or one using `deny_unknown_fields`, is unaffected by this
+    /// field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corroborated_by: Option<u32>,
 }
 
 impl Default for ResultMetadata {
@@ -71,7 +67,7 @@ impl Default for ResultMetadata {
             source: String::new(),
             favicon: None,
             published_date: None,
-            corroborated_by: 1,
+            corroborated_by: None,
         }
     }
 }
