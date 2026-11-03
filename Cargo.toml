@@ -12,6 +12,10 @@ readme = "README.md"
 keywords = ["mcp", "duckduckgo", "search", "ai", "cli"]
 categories = ["command-line-utilities", "web-programming", "development-tools"]
 rust-version = "1.99"
+# The toolchain pin governs building THIS repo, not consuming the crate, so it
+# must not ride along in the published tarball — a consumer's `cargo install`
+# would otherwise be forced onto 1.99 regardless of their own toolchain.
+exclude = ["rust-toolchain.toml"]
 
 [lib]
 name = "daedra"

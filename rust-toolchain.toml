@@ -1,0 +1,19 @@
+[toolchain]
+# Pinned to the MSRV declared in Cargo.toml (`rust-version = "1.99"`), and to
+# the version the `msrv` and `publish` CI jobs already install by name.
+#
+# Without this file a checkout builds on whatever `rustup default` happens to
+# be, which fails outright on anything older than 1.99:
+#
+#   error: rustc 1.98.0 is not supported by the following packages:
+#     daedra@0.5.14 requires rustc 1.99
+#
+# "1.99" (not "1.99.1") on purpose: this is a floor, so patch releases in the
+# 1.99 series are picked up automatically, matching what `rust-version` means.
+#
+# NOTE: this file outranks `rustup default`, which is what dtolnay/rust-toolchain
+# sets. Any CI job that means to test a *different* toolchain (the stable/beta
+# matrix) must therefore set RUSTUP_TOOLCHAIN explicitly, because that is the
+# only setting that outranks this file.
+channel = "1.99"
+components = ["rustfmt", "clippy"]
