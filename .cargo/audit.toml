@@ -11,8 +11,12 @@
 #   RUSTSEC-2026-0367  insecure preservation of SUID/SGID during extraction
 #   RUSTSEC-2026-0368  extract() creates symlinks with attacker-controlled targets
 #   RUSTSEC-2026-0369  Unix permissions applied through symlinks, unconfinement
+#   RUSTSEC-2026-0429  extract() aborts on a symlink entry with a large declared
+#                      size: it sizes a Vec from the central directory's
+#                      uncompressed_size before reading entry data, and a refused
+#                      reservation calls handle_alloc_error() (abort, not panic)
 #
-# All three are about `ZipArchive::extract()` / `ZipFile::extract()` WRITING
+# All four are about `ZipArchive::extract()` / `ZipFile::extract()` WRITING
 # FILES TO DISK. anydoc 0.2.4 never calls it.
 #
 # Verified against the vendored source of anydoc 0.2.4, 2026-10-31:
@@ -37,4 +41,5 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
 ]
