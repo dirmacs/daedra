@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-11-04
+
+### Fixed
+- `format_for_engine` sent every quoted phrase to the engine **twice**:
+
+  ```
+  in : AI company "custom AI infrastructure" contact page
+  out: AI company "custom AI infrastructure" contact page "custom AI infrastructure"
+  ```
+
+  The free text `q.text` is built from the same tokens as `q.terms`, so each phrase was
+  appended a second time. The existing de-duplication compares whole parts and could not
+  see the copy already embedded in `q.text`. A doubled phrase skews term weighting and can
+  read as a malformed operator expression to an engine that honours quotes; queries
+  carrying quoted phrases are common, so this degraded most searches. Two regression tests
+  pin the single-phrase and multi-phrase cases.
+
 ## [0.5.14] - 2026-11-01
 
 ### Added

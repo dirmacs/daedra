@@ -1046,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "daedra"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "anydoc",
  "anyhow",
