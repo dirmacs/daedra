@@ -279,8 +279,22 @@ pub fn format_for_engine(q: &StructuredQuery) -> String {
     for s in &q.excluded_sites {
         parts.push(format!("-site:{s}"));
     }
+    // Quoted phrases go in only if the free text does not already carry them.
+    //
+    // `q.text` is built from the same tokens as `q.terms` (see `parse`), so a
+    // query containing a quoted phrase produced the phrase twice:
+    //
+    //   AI company "custom AI infrastructure" OR "AI hallucination" contact page
+    //     "custom AI infrastructure" "AI hallucination"
+    //
+    // The trailing dedup could not catch it, because it compares whole parts and
+    // the phrase inside `q.text` is not a separate part. Measured 2026-11-04:
+    // reproduced with the CLI alone, so the duplication is this crate's. Queries
+    // carrying quoted terms are common, so every one of them was being degraded.
+    // A doubled phrase is not merely untidy: engines weight repeats, and quoted
+    // strings that appear twice can read as a malformed operator expression.
     for t in &q.terms {
-        if t.phrase {
+        if t.phrase && !q.text.contains(&format!("\"{}\"", t.text)) {
             parts.push(format!("\"{}\"", t.text));
         }
     }
@@ -472,11 +486,10 @@ mod tests {
     #[test]
     fn keeps_quoted_phrases_whole() {
         let q = parse("\"exact phrase here\" tokio");
-        assert!(
-            q.terms
-                .iter()
-                .any(|t| t.phrase && t.text == "exact phrase here")
-        );
+        assert!(q
+            .terms
+            .iter()
+            .any(|t| t.phrase && t.text == "exact phrase here"));
     }
 
     #[test]
@@ -568,6 +581,36 @@ mod tests {
     }
 
     #[test]
+    /// A quoted phrase must appear ONCE in the engine string.
+    ///
+    /// `q.text` is built from the same tokens as `q.terms`, so the old code
+    /// emitted every phrase twice — measured 2026-11-04 with the daedra CLI:
+    ///
+    ///   in : AI company "custom AI infrastructure" contact page
+    ///   out: AI company "custom AI infrastructure" contact page "custom AI infrastructure"
+    #[test]
+    fn format_for_engine_does_not_repeat_a_quoted_phrase() {
+        let q = parse(r#"AI company "custom AI infrastructure" contact page"#);
+        let out = format_for_engine(&q);
+        let occurrences = out.matches(r#""custom AI infrastructure""#).count();
+        assert_eq!(
+            occurrences, 1,
+            "the phrase must appear once, got {occurrences} in {out:?}"
+        );
+    }
+
+    /// More than one quoted phrase, all of them once — the shape every
+    /// prospecting query has.
+    #[test]
+    fn format_for_engine_does_not_repeat_any_of_several_phrases() {
+        let q = parse(r#"AI company "custom AI infrastructure" OR "AI hallucination" contact"#);
+        let out = format_for_engine(&q);
+        for phrase in [r#""custom AI infrastructure""#, r#""AI hallucination""#] {
+            let n = out.matches(phrase).count();
+            assert_eq!(n, 1, "{phrase} appeared {n} times in {out:?}");
+        }
+    }
+
     fn format_for_engine_is_never_empty_for_directive_only_query() {
         let q = parse("site:github.com");
         assert!(!format_for_engine(&q).is_empty());
