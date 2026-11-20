@@ -125,6 +125,13 @@ jobs:
             target: x86_64-unknown-linux-musl
             artifact_name: daedra
             asset_name: daedra-linux-x86_64-musl
+          # Native arm64 runner, so the C parts of the dependency tree (ring,
+          # aws-lc) build with the host's musl-gcc and no cross toolchain.
+          # For agent clients on Android (proot) and other aarch64 Linux.
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact_name: daedra
+            asset_name: daedra-linux-aarch64-musl
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: daedra
@@ -148,11 +155,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install musl-tools (Linux musl)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: contains(matrix.target, 'linux-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CC_aarch64_unknown_linux_musl: musl-gcc
 
       - name: Strip binary (Linux/macOS)
         if: runner.os != 'Windows'
